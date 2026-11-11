@@ -4,11 +4,13 @@ Voyaura is a map-first travel companion for planning journeys, lighting up
 visited cities, preserving photos and vlogs, and turning memories into visual
 stories with Xiaoxi.
 
+![1794376848603](image\README\1794376848603.png)
+
 ## Projects
 
 - `web/`: Vue 3 responsive PWA for mobile and desktop.
 - `api/`: FastAPI service and PostgreSQL data model.
-- `worker/`: reserved for image, video, and ComfyUI jobs.
+- `worker/`: Redis worker for media scanning, thumbnails, video covers, and future image jobs.
 - `infra/`: local PostgreSQL, Redis, and MinIO services.
 - `docx/`: product, architecture, integration, database, and delivery docs.
 
@@ -20,6 +22,7 @@ stories with Xiaoxi.
 4. From `api/`, run `python -m alembic -c alembic.ini upgrade head`, then `python -m app.seed`.
 5. From `api/`, start `python -m uvicorn app.main:app --host 127.0.0.1 --port 8001`.
 6. From `web/`, run `npm install`, then `npm run dev -- --host 127.0.0.1 --port 5174`.
+7. From the project root, start the media worker with `.\worker\run.ps1`.
 
 Local services:
 
@@ -30,6 +33,15 @@ Local services:
 - MinIO API: `http://127.0.0.1:9000`
 - MinIO console: `http://127.0.0.1:9001`
 
+Uploaded media remains hidden until the worker finishes malware scanning and
+creates a WebP thumbnail or video cover. Run the isolated environment check
+from `api/` with `.\.venv\Scripts\python.exe scripts\media_pipeline_smoke.py`.
+The city archive lists pending and failed media tasks, retries recoverable
+worker failures, and deletes one asset through preview and confirmation.
+The worker also removes expired, unfinished upload intents once per hour. Run
+that cleanup manually from `api/` with
+`.\.venv\Scripts\python.exe -m app.media_cleanup --limit 100`.
+
 The Redis image comes from Amazon ECR's official Docker Library mirror. The
 MinIO image comes from Chainguard and is pinned by digest. These project-level
 sources avoid depending on a machine-wide Docker Hub mirror. If startup fails,
@@ -38,4 +50,3 @@ failing service with `docker compose --env-file .env -f infra/compose.yml logs S
 
 The default seed creates `AuroraRovella` as the first tester without inventing
 any travel history. Authentication will be added in a later milestone.
-

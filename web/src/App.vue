@@ -7,11 +7,14 @@ import {
   confirmCityMemory,
   confirmCityMemoryDelete,
   confirmCityMemoryUpdate,
+  confirmMediaDelete,
   completeMediaUpload,
   confirmManualCheckIn,
   createMediaUploadIntent,
   emptyOverview,
   getCityMemories,
+  getCityMediaTasks,
+  getMediaProcessingStatus,
   getMapOverview,
   previewCheckIn,
   previewCityMemory,
@@ -19,6 +22,7 @@ import {
   previewCityMemoryUpdate,
   previewMediaUpload,
   previewManualCheckIn,
+  previewMediaDelete,
   uploadMediaFile,
 } from './api/client'
 import AppNavigation from './components/AppNavigation.vue'
@@ -26,6 +30,7 @@ import CheckInDialog from './components/CheckInDialog.vue'
 import CityMemoryPanel from './components/CityMemoryPanel.vue'
 import MemoryComposerDialog from './components/MemoryComposerDialog.vue'
 import MemoryDeleteDialog from './components/MemoryDeleteDialog.vue'
+import MediaDeleteDialog from './components/MediaDeleteDialog.vue'
 import MediaUploadDialog from './components/MediaUploadDialog.vue'
 import { locateCityByIp, searchCities } from './location/amapCity'
 import type {
@@ -43,9 +48,14 @@ import type {
   CityMemoryUpdatePreview,
   ManualCityCheckIn,
   MapOverview,
+  MediaDeleteDraft,
+  MediaDeletePreview,
+  MediaTaskItem,
   MediaUploadDraft,
   MediaUploadIntent,
   MediaUploadPreview,
+  MediaUploadProgress,
+  MemoryMediaAsset,
   NewMemoryInput,
   VisitedCity,
 } from './types'
@@ -70,6 +80,9 @@ const selectedCity = ref<VisitedCity | null>(null)
 const cityMemoryPhase = ref<'loading' | 'ready' | 'error'>('loading')
 const cityMemoryDetail = ref<CityMemoryDetail | null>(null)
 const cityMemoryError = ref<AppErrorInfo | null>(null)
+const cityMediaTasks = ref<MediaTaskItem[]>([])
+const mediaTaskBusyId = ref<string | null>(null)
+const mediaTaskError = ref<AppErrorInfo | null>(null)
 const memoryComposerCity = ref<VisitedCity | null>(null)
 const memoryComposerMode = ref<'create' | 'edit'>('create')
 const memoryTarget = ref<CityMemoryItem | null>(null)
@@ -83,9 +96,15 @@ const memoryDeletePhase = ref<'loading' | 'preview' | 'deleting' | 'success' | '
 const memoryDeleteDraft = ref<CityMemoryDeleteDraft | null>(null)
 const memoryDeletePreview = ref<CityMemoryDeletePreview | null>(null)
 const memoryDeleteError = ref<AppErrorInfo | null>(null)
+const mediaDeleteCity = ref<VisitedCity | null>(null)
+const mediaDeleteTarget = ref<{ memoryId: string, assetId: string } | null>(null)
+const mediaDeletePhase = ref<'loading' | 'preview' | 'deleting' | 'success' | 'error'>('loading')
+const mediaDeleteDraft = ref<MediaDeleteDraft | null>(null)
+const mediaDeletePreview = ref<MediaDeletePreview | null>(null)
+const mediaDeleteError = ref<AppErrorInfo | null>(null)
 const mediaUploadCity = ref<VisitedCity | null>(null)
 const mediaUploadMemory = ref<CityMemoryItem | null>(null)
-const mediaUploadPhase = ref<'selecting' | 'preview' | 'uploading' | 'success' | 'error'>('selecting')
+const mediaUploadPhase = ref<'selecting' | 'preview' | 'uploading' | 'processing' | 'success' | 'error'>('selecting')
 const mediaUploadFile = ref<File | null>(null)
 const mediaUploadDraft = ref<MediaUploadDraft | null>(null)
 const mediaUploadPreview = ref<MediaUploadPreview | null>(null)
@@ -93,6 +112,9 @@ const mediaUploadIntent = ref<MediaUploadIntent | null>(null)
 const mediaUploadTransferred = ref(false)
 const mediaUploadCompleted = ref(false)
 const mediaUploadError = ref<AppErrorInfo | null>(null)
+const mediaUploadProgress = ref<MediaUploadProgress>({ loaded: 0, total: 0, percent: 0 })
+let mediaUploadAbortController: AbortController | null = null
+let mediaUploadPollVersion = 0
 const checkInBusy = computed(() => checkInPhase.value === 'locating' || checkInPhase.value === 'confirming')
 
 onMounted(async () => {
@@ -296,17 +318,26 @@ async function selectCity(city: VisitedCity) {
   selectedCity.value = city
   cityMemoryDetail.value = null
   cityMemoryError.value = null
+  cityMediaTasks.value = []
+  mediaTaskError.value = null
   cityMemoryPhase.value = 'loading'
   xiaoxiOpen.value = false
-  try {
-    const detail = await getCityMemories(city.adcode)
-    if (selectedCity.value?.adcode !== city.adcode) return
-    cityMemoryDetail.value = detail
-    cityMemoryPhase.value = 'ready'
-  } catch (error) {
-    if (selectedCity.value?.adcode !== city.adcode) return
-    cityMemoryError.value = normalizeError(error)
+  const [detailResult, tasksResult] = await Promise.allSettled([
+    getCityMemories(city.adcode),
+    getCityMediaTasks(city.adcode),
+  ])
+  if (selectedCity.value?.adcode !== city.adcode) return
+  if (detailResult.status === 'rejected') {
+    cityMemoryError.value = normalizeError(detailResult.reason)
     cityMemoryPhase.value = 'error'
+    return
+  }
+  cityMemoryDetail.value = detailResult.value
+  cityMemoryPhase.value = 'ready'
+  if (tasksResult.status === 'fulfilled') {
+    cityMediaTasks.value = tasksResult.value.items
+  } else {
+    mediaTaskError.value = normalizeError(tasksResult.reason)
   }
 }
 
@@ -314,6 +345,8 @@ function closeCityMemory() {
   selectedCity.value = null
   cityMemoryDetail.value = null
   cityMemoryError.value = null
+  cityMediaTasks.value = []
+  mediaTaskError.value = null
 }
 
 function openXiaoxi() {
@@ -392,7 +425,13 @@ async function previewMemory(input: NewMemoryInput) {
 async function refreshMemoryViews(adcode: string) {
   overview.value = await getMapOverview()
   if (selectedCity.value?.adcode === adcode) {
-    cityMemoryDetail.value = await getCityMemories(adcode)
+    const [detail, tasks] = await Promise.all([
+      getCityMemories(adcode),
+      getCityMediaTasks(adcode),
+    ])
+    cityMemoryDetail.value = detail
+    cityMediaTasks.value = tasks.items
+    mediaTaskError.value = null
     selectedCity.value = cityMemoryDetail.value.city
   }
 }
@@ -490,8 +529,119 @@ async function confirmMemoryDelete() {
   }
 }
 
+async function openMediaDelete(
+  memoryId: string,
+  asset: MemoryMediaAsset | MediaTaskItem,
+) {
+  if (!selectedCity.value) return
+  const assetId = 'asset_id' in asset ? asset.asset_id : asset.id
+  mediaDeleteCity.value = selectedCity.value
+  mediaDeleteTarget.value = { memoryId, assetId }
+  mediaDeletePhase.value = 'loading'
+  mediaDeletePreview.value = null
+  mediaDeleteError.value = null
+  mediaDeleteDraft.value = {
+    username: 'AuroraRovella',
+    client_request_id: crypto.randomUUID(),
+  }
+  try {
+    mediaDeletePreview.value = await previewMediaDelete(
+      selectedCity.value.adcode,
+      memoryId,
+      assetId,
+      mediaDeleteDraft.value,
+    )
+    mediaDeletePhase.value = 'preview'
+  } catch (error) {
+    mediaDeleteError.value = normalizeError(error)
+    mediaDeletePhase.value = 'error'
+  }
+}
+
+function closeMediaDelete() {
+  mediaDeleteCity.value = null
+  mediaDeleteTarget.value = null
+  mediaDeleteDraft.value = null
+  mediaDeletePreview.value = null
+  mediaDeleteError.value = null
+}
+
+async function confirmSelectedMediaDelete() {
+  if (!mediaDeleteCity.value || !mediaDeleteTarget.value || !mediaDeleteDraft.value) {
+    mediaDeleteError.value = localError(
+      'MEDIA_DELETE_CONTEXT_LOST',
+      '媒体删除上下文已失效，请重新选择文件。',
+      false,
+    )
+    mediaDeletePhase.value = 'error'
+    return
+  }
+  mediaDeletePhase.value = 'deleting'
+  try {
+    await confirmMediaDelete(
+      mediaDeleteCity.value.adcode,
+      mediaDeleteTarget.value.memoryId,
+      mediaDeleteTarget.value.assetId,
+      mediaDeleteDraft.value,
+    )
+    await refreshMemoryViews(mediaDeleteCity.value.adcode)
+    mediaDeletePhase.value = 'success'
+  } catch (error) {
+    mediaDeleteError.value = normalizeError(error)
+    mediaDeletePhase.value = 'error'
+  }
+}
+
+async function retryMediaTask(task: MediaTaskItem) {
+  const city = selectedCity.value
+  if (!city || mediaTaskBusyId.value) return
+  mediaTaskBusyId.value = task.asset_id
+  mediaTaskError.value = null
+  try {
+    await completeMediaUpload(city.adcode, task.memory_id, task.asset_id)
+    let ready = false
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (selectedCity.value?.adcode !== city.adcode) return
+      if (attempt > 0) await wait(1500)
+      const status = await getMediaProcessingStatus(
+        city.adcode,
+        task.memory_id,
+        task.asset_id,
+      )
+      if (status.status === 'ready') {
+        ready = true
+        break
+      }
+      if (status.status === 'failed') {
+        throw new ApiClientError({
+          code: status.failure_code ?? 'MEDIA_PROCESSING_ERROR',
+          message: status.failure_message ?? '媒体重新处理失败。',
+          details: { asset_id: status.asset_id, scan_status: status.scan_status },
+          retryable: status.retryable,
+        })
+      }
+    }
+    if (!ready) {
+      throw new ApiClientError({
+        code: 'MEDIA_PROCESSING_TIMEOUT',
+        message: '媒体仍在处理中，可以稍后再次查看。',
+        details: { asset_id: task.asset_id },
+        retryable: true,
+      })
+    }
+    await refreshMemoryViews(city.adcode)
+  } catch (error) {
+    mediaTaskError.value = normalizeError(error)
+  } finally {
+    mediaTaskBusyId.value = null
+  }
+}
+
 function openMediaUpload(memory: CityMemoryItem) {
   if (!selectedCity.value) return
+  mediaUploadPollVersion += 1
+  mediaUploadAbortController?.abort()
+  mediaUploadAbortController = null
   mediaUploadCity.value = selectedCity.value
   mediaUploadMemory.value = memory
   mediaUploadPhase.value = 'selecting'
@@ -502,9 +652,13 @@ function openMediaUpload(memory: CityMemoryItem) {
   mediaUploadTransferred.value = false
   mediaUploadCompleted.value = false
   mediaUploadError.value = null
+  mediaUploadProgress.value = { loaded: 0, total: 0, percent: 0 }
 }
 
 function closeMediaUpload() {
+  mediaUploadPollVersion += 1
+  mediaUploadAbortController?.abort()
+  mediaUploadAbortController = null
   mediaUploadCity.value = null
   mediaUploadMemory.value = null
   mediaUploadFile.value = null
@@ -514,6 +668,7 @@ function closeMediaUpload() {
   mediaUploadTransferred.value = false
   mediaUploadCompleted.value = false
   mediaUploadError.value = null
+  mediaUploadProgress.value = { loaded: 0, total: 0, percent: 0 }
 }
 
 async function previewSelectedMedia(file: File) {
@@ -523,6 +678,7 @@ async function previewSelectedMedia(file: File) {
   mediaUploadIntent.value = null
   mediaUploadTransferred.value = false
   mediaUploadCompleted.value = false
+  mediaUploadProgress.value = { loaded: 0, total: file.size, percent: 0 }
   mediaUploadDraft.value = {
     username: 'AuroraRovella',
     client_request_id: crypto.randomUUID(),
@@ -546,6 +702,9 @@ async function previewSelectedMedia(file: File) {
 }
 
 function editMediaSelection() {
+  mediaUploadPollVersion += 1
+  mediaUploadAbortController?.abort()
+  mediaUploadAbortController = null
   mediaUploadPhase.value = 'selecting'
   mediaUploadPreview.value = null
   mediaUploadError.value = null
@@ -553,6 +712,55 @@ function editMediaSelection() {
   mediaUploadIntent.value = null
   mediaUploadTransferred.value = false
   mediaUploadCompleted.value = false
+  mediaUploadProgress.value = { loaded: 0, total: 0, percent: 0 }
+}
+
+function cancelMediaUpload() {
+  mediaUploadPollVersion += 1
+  mediaUploadAbortController?.abort()
+  mediaUploadAbortController = null
+  mediaUploadTransferred.value = false
+  mediaUploadCompleted.value = false
+  mediaUploadError.value = null
+  mediaUploadProgress.value = {
+    loaded: 0,
+    total: mediaUploadFile.value?.size ?? 0,
+    percent: 0,
+  }
+  mediaUploadPhase.value = mediaUploadPreview.value ? 'preview' : 'selecting'
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+async function waitForMediaReady(
+  adcode: string,
+  memoryId: string,
+  assetId: string,
+  pollVersion: number,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (pollVersion !== mediaUploadPollVersion) return false
+    if (attempt > 0) await wait(1500)
+    if (pollVersion !== mediaUploadPollVersion) return false
+    const status = await getMediaProcessingStatus(adcode, memoryId, assetId)
+    if (status.status === 'ready') return true
+    if (status.status === 'failed') {
+      throw new ApiClientError({
+        code: status.failure_code ?? 'MEDIA_PROCESSING_ERROR',
+        message: status.failure_message ?? '媒体安全处理失败，请重新选择文件或稍后重试。',
+        details: { asset_id: status.asset_id, scan_status: status.scan_status },
+        retryable: status.retryable,
+      })
+    }
+  }
+  throw new ApiClientError({
+    code: 'MEDIA_PROCESSING_TIMEOUT',
+    message: '媒体仍在处理中，可以稍后重试查询。',
+    details: { asset_id: assetId },
+    retryable: true,
+  })
 }
 
 async function confirmMediaUpload() {
@@ -571,6 +779,11 @@ async function confirmMediaUpload() {
     return
   }
   mediaUploadPhase.value = 'uploading'
+  mediaUploadError.value = null
+  mediaUploadProgress.value = mediaUploadTransferred.value
+    ? { loaded: mediaUploadFile.value.size, total: mediaUploadFile.value.size, percent: 100 }
+    : { loaded: 0, total: mediaUploadFile.value.size, percent: 0 }
+  const pollVersion = ++mediaUploadPollVersion
   try {
     if (!mediaUploadCompleted.value) {
       if (!mediaUploadIntent.value) {
@@ -579,9 +792,24 @@ async function confirmMediaUpload() {
           mediaUploadMemory.value.id,
           mediaUploadDraft.value,
         )
+        if (pollVersion !== mediaUploadPollVersion) return
       }
       if (!mediaUploadTransferred.value) {
-        await uploadMediaFile(mediaUploadIntent.value, mediaUploadFile.value)
+        const uploadController = new AbortController()
+        mediaUploadAbortController = uploadController
+        try {
+          await uploadMediaFile(mediaUploadIntent.value, mediaUploadFile.value, {
+            signal: uploadController.signal,
+            onProgress: (progress) => {
+              if (pollVersion === mediaUploadPollVersion) mediaUploadProgress.value = progress
+            },
+          })
+        } finally {
+          if (mediaUploadAbortController === uploadController) {
+            mediaUploadAbortController = null
+          }
+        }
+        if (pollVersion !== mediaUploadPollVersion) return
         mediaUploadTransferred.value = true
       }
       await completeMediaUpload(
@@ -589,11 +817,31 @@ async function confirmMediaUpload() {
         mediaUploadMemory.value.id,
         mediaUploadIntent.value.asset_id,
       )
+      if (pollVersion !== mediaUploadPollVersion) return
       mediaUploadCompleted.value = true
     }
+    const intent = mediaUploadIntent.value
+    if (!intent) {
+      throw new ApiClientError({
+        code: 'MEDIA_UPLOAD_CONTEXT_LOST',
+        message: '上传任务信息已失效，请重新选择文件。',
+        details: {},
+        retryable: false,
+      })
+    }
+    mediaUploadPhase.value = 'processing'
+    const ready = await waitForMediaReady(
+      mediaUploadCity.value.adcode,
+      mediaUploadMemory.value.id,
+      intent.asset_id,
+      pollVersion,
+    )
+    if (!ready) return
     await refreshMemoryViews(mediaUploadCity.value.adcode)
     mediaUploadPhase.value = 'success'
   } catch (error) {
+    if (pollVersion !== mediaUploadPollVersion) return
+    mediaUploadCompleted.value = false
     mediaUploadError.value = normalizeError(error)
     mediaUploadPhase.value = 'error'
   }
@@ -650,6 +898,9 @@ async function confirmMediaUpload() {
         :phase="cityMemoryPhase"
         :detail="cityMemoryDetail"
         :error="cityMemoryError"
+        :media-tasks="cityMediaTasks"
+        :media-task-busy-id="mediaTaskBusyId"
+        :media-task-error="mediaTaskError"
         @close="closeCityMemory"
         @retry="selectCity(selectedCity)"
         @ask-xiaoxi="askXiaoxiAboutCity"
@@ -657,6 +908,8 @@ async function confirmMediaUpload() {
         @edit-memory="openMemoryEditor"
         @delete-memory="openMemoryDelete"
         @upload-media="openMediaUpload"
+        @retry-media="retryMediaTask"
+        @delete-media="openMediaDelete"
       />
     </Transition>
 
@@ -668,12 +921,26 @@ async function confirmMediaUpload() {
         :phase="mediaUploadPhase"
         :file="mediaUploadFile"
         :preview="mediaUploadPreview"
+        :upload-progress="mediaUploadProgress"
         :error="mediaUploadError"
         @cancel="closeMediaUpload"
         @preview="previewSelectedMedia"
         @confirm="confirmMediaUpload"
+        @cancel-upload="cancelMediaUpload"
         @retry="confirmMediaUpload"
         @edit="editMediaSelection"
+      />
+    </Transition>
+
+    <Transition name="dialog">
+      <MediaDeleteDialog
+        v-if="mediaDeleteCity"
+        :city="mediaDeleteCity"
+        :phase="mediaDeletePhase"
+        :preview="mediaDeletePreview"
+        :error="mediaDeleteError"
+        @cancel="closeMediaDelete"
+        @confirm="confirmSelectedMediaDelete"
       />
     </Transition>
 

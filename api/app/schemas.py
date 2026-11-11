@@ -91,6 +91,11 @@ class MediaAssetOut(BaseModel):
     visibility: Literal["private"] = "private"
     upload_status: Literal["ready"] = "ready"
     exif_status: Literal["removed", "not_applicable"] = "not_applicable"
+    scan_status: Literal["clean", "not_scanned"] = "not_scanned"
+    thumbnail_url: str | None = None
+    content_url: str | None = None
+    thumbnail_width: int | None = None
+    thumbnail_height: int | None = None
     created_at: datetime
 
 
@@ -112,7 +117,7 @@ class MediaUploadPreviewOut(BaseModel):
     quota_remaining_bytes: int
     visibility: Literal["private"] = "private"
     confirmation_notice: str = (
-        "确认后文件将直接上传到 Voyaura 私有对象存储；照片会移除 EXIF 元数据。"
+        "确认后文件将上传到私有对象存储，并在安全扫描后生成预览；照片会移除 EXIF 元数据。"
     )
 
 
@@ -130,8 +135,66 @@ class MediaUploadCompleteDraft(BaseModel):
 
 
 class MediaUploadCompleteOut(BaseModel):
-    status: Literal["ready", "existing"]
-    asset: MediaAssetOut
+    status: Literal["processing", "ready", "existing"]
+    asset_id: uuid.UUID
+    asset: MediaAssetOut | None = None
+    processing_notice: str = "文件已进入私有媒体处理队列，完成安全扫描后才会显示。"
+
+
+class MediaProcessingStatusOut(BaseModel):
+    status: Literal["pending", "processing", "ready", "failed"]
+    asset_id: uuid.UUID
+    scan_status: Literal["not_scanned", "pending", "scanning", "clean", "infected", "error"]
+    failure_code: str | None = None
+    failure_message: str | None = None
+    retryable: bool = False
+    asset: MediaAssetOut | None = None
+
+
+class MediaTaskOut(BaseModel):
+    asset_id: uuid.UUID
+    memory_id: uuid.UUID
+    memory_title: str
+    kind: Literal["photo", "vlog"]
+    original_filename: str
+    byte_size: int
+    upload_status: Literal["pending", "processing", "failed"]
+    scan_status: Literal["not_scanned", "pending", "scanning", "clean", "infected", "error"]
+    failure_code: str | None = None
+    failure_message: str | None = None
+    retryable: bool = False
+    expired: bool = False
+    upload_expires_at: datetime | None = None
+    created_at: datetime
+
+
+class MediaTaskListOut(BaseModel):
+    items: list[MediaTaskOut]
+
+
+class MediaDeleteDraft(BaseModel):
+    username: str = Field(default="AuroraRovella", min_length=1, max_length=64)
+    client_request_id: uuid.UUID
+
+
+class MediaDeletePreviewOut(BaseModel):
+    asset_id: uuid.UUID
+    memory_id: uuid.UUID
+    city_adcode: str
+    city_name: str
+    memory_title: str
+    kind: Literal["photo", "vlog"]
+    original_filename: str
+    byte_size: int
+    upload_status: Literal["pending", "ready", "failed"]
+    confirmation_notice: str = "确认后将永久删除原文件、预览图和媒体记录，此操作无法撤销。"
+
+
+class MediaDeleteConfirmOut(BaseModel):
+    status: Literal["deleted", "existing"]
+    asset_id: uuid.UUID
+    memory_id: uuid.UUID
+    city_adcode: str
 
 
 class CityMemoryItemOut(BaseModel):
@@ -210,4 +273,70 @@ class CityMemoryDeleteConfirmOut(BaseModel):
     status: Literal["deleted", "existing"]
     memory_id: uuid.UUID
     city_adcode: str
+
+
+class ImageStyleOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    swatch: str
+
+
+class ImageStyleCatalogOut(BaseModel):
+    provider: str
+    available: bool
+    missing_settings: list[str]
+    styles: list[ImageStyleOut]
+
+
+class ImageJobDraft(BaseModel):
+    username: str = Field(default="AuroraRovella", min_length=1, max_length=64)
+    source_asset_id: uuid.UUID
+    style_id: str = Field(min_length=1, max_length=64)
+    prompt: str = Field(default="", max_length=1200)
+    negative_prompt: str | None = Field(default=None, max_length=1200)
+
+
+class ImageJobCreateDraft(ImageJobDraft):
+    client_request_id: uuid.UUID
+
+
+class ImageJobPreviewOut(BaseModel):
+    source_asset_id: uuid.UUID
+    source_filename: str
+    city_adcode: str
+    city_name: str
+    memory_id: uuid.UUID
+    memory_title: str
+    style: ImageStyleOut
+    effective_prompt: str
+    negative_prompt: str | None
+    provider: str
+    provider_available: bool
+    confirmation_notice: str = (
+        "确认后原图会由私有 worker 发送给已配置的图片 Provider，生成结果仍保存为私有资源。"
+    )
+
+
+class ImageJobOut(BaseModel):
+    id: uuid.UUID
+    status: Literal["queued", "running", "succeeded", "failed"]
+    source_asset_id: uuid.UUID
+    style_id: str
+    provider: str
+    provider_job_id: str | None = None
+    output_url: str | None = None
+    output_mime_type: str | None = None
+    output_width: int | None = None
+    output_height: int | None = None
+    failure_code: str | None = None
+    failure_message: str | None = None
+    retryable: bool = False
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
+class ImageJobCreateOut(BaseModel):
+    status: Literal["created", "existing"]
+    job: ImageJobOut
 

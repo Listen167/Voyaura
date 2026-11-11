@@ -137,13 +137,71 @@ class MediaAsset(Base):
     visibility: Mapped[str] = mapped_column(String(20), default="private")
     upload_status: Mapped[str] = mapped_column(String(20), default="ready")
     exif_status: Mapped[str] = mapped_column(String(24), default="not_applicable")
+    scan_status: Mapped[str] = mapped_column(String(20), default="not_scanned")
     failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    processing_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    thumbnail_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    thumbnail_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    thumbnail_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     upload_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     memory: Mapped[CityMemory] = relationship(back_populates="media_assets")
+
+
+class MediaMutation(Base):
+    __tablename__ = "media_mutations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "client_request_id", name="uq_media_mutation_user_request"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    city_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cities.id", ondelete="CASCADE"))
+    target_memory_id: Mapped[uuid.UUID] = mapped_column(index=True)
+    target_asset_id: Mapped[uuid.UUID] = mapped_column(index=True)
+    client_request_id: Mapped[uuid.UUID] = mapped_column()
+    operation: Mapped[str] = mapped_column(String(20))
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    response_snapshot: Mapped[dict[str, object]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ImageGenerationJob(Base):
+    __tablename__ = "image_generation_jobs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "client_request_id", name="uq_image_job_user_request"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    city_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cities.id", ondelete="CASCADE"))
+    memory_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("city_memories.id", ondelete="CASCADE"), index=True
+    )
+    source_asset_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("media_assets.id", ondelete="CASCADE"), index=True
+    )
+    client_request_id: Mapped[uuid.UUID] = mapped_column()
+    provider: Mapped[str] = mapped_column(String(40))
+    style_id: Mapped[str] = mapped_column(String(64))
+    prompt: Mapped[str] = mapped_column(Text)
+    negative_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    provider_job_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    output_storage_key: Mapped[str | None] = mapped_column(String(512), unique=True, nullable=True)
+    output_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    output_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    provider_metadata: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

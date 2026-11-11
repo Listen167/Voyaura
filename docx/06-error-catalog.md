@@ -89,6 +89,37 @@
 | `MEDIA_VIDEO_INVALID` | 视频文件头不符合 MP4/MOV/WebM | 使用受支持编码重新导出 |
 | `MEDIA_DIRECT_UPLOAD_NETWORK_ERROR` | 浏览器无法访问签名 MinIO 地址 | 检查 MinIO、CORS 和签名 URL 的主机地址 |
 | `MEDIA_DIRECT_UPLOAD_FAILED` | MinIO 拒绝 PUT | 查看 HTTP 状态并确认签名未过期 |
+| `MEDIA_UPLOAD_CANCELLED` | 用户取消了正在进行的 MinIO PUT | 返回上传预览页；需要时可使用原上传任务重新上传 |
+| `MEDIA_QUEUE_UNAVAILABLE` | API 或 worker 无法连接 Redis 媒体队列 | 检查 `6379` 端口、Redis 容器和 `VOYAURA_REDIS_URL`；该错误可重试 |
+| `MEDIA_SCANNER_UNAVAILABLE` | Defender/ClamAV 不可用、超时或返回未知结果 | 检查 Defender 状态或 ClamAV 地址；修复后可在上传窗口重试 |
+| `MEDIA_SCANNER_CONFIG_ERROR` | 扫描 Provider 名称无效 | 修正 `VOYAURA_MEDIA_SCANNER_PROVIDER` 为 `windows_defender` 或 `clamav` |
+| `MEDIA_MALWARE_DETECTED` | 文件未通过安全扫描 | 原文件已从 MinIO 删除；不要重试该对象，重新检查来源文件 |
+| `MEDIA_THUMBNAIL_FAILED` | 已上传图片无法生成 WebP 缩略图 | 重新导出静态图片后上传 |
+| `MEDIA_VIDEO_PROCESSING_FAILED` | ffprobe 无法读取视频或 FFmpeg 无法生成封面 | 使用受支持编码重新导出视频，并检查 FFmpeg 日志 |
+| `MEDIA_PROCESSING_ERROR` | worker 发生未识别处理错误 | 查看 worker 日志；状态接口会标记为可重试 |
+| `MEDIA_PROCESSING_TIMEOUT` | 前端等待处理超过约 2 分钟 | 确认 worker 正在运行后点击重试，不需要重新 PUT 已上传文件 |
+| `MEDIA_UPLOAD_CONTEXT_LOST` | 前端丢失当前上传任务信息 | 关闭上传窗口并重新选择文件 |
+| `MEDIA_ASSET_NOT_FOUND` | 媒体记录不存在、已删除或不属于当前记忆 | 刷新城市档案和任务列表，不要为未知媒体重复创建删除请求 |
+| `MEDIA_UPLOAD_FAILED_STATE` | 失败原因不可恢复，不能复用原任务 | 删除失败任务并重新选择原文件创建上传任务 |
+| `MEDIA_UPLOAD_ALREADY_COMPLETE` | 上传任务已经处理完成 | 刷新城市档案，无需再次调用完成接口 |
+| `MEDIA_DELETE_PROCESSING_CONFLICT` | 媒体正由 worker 处理，暂不能删除 | 等待任务进入 `ready` 或 `failed` 后重试删除 |
+| `MEDIA_MUTATION_IDEMPOTENCY_CONFLICT` | 删除请求编号被用于另一媒体或操作 | 为新的删除操作生成新的 `client_request_id` |
+
+失败任务列表只把 `MEDIA_QUEUE_UNAVAILABLE`、`MEDIA_SCANNER_UNAVAILABLE`、`MEDIA_STORAGE_UNAVAILABLE` 和 `MEDIA_PROCESSING_ERROR` 标记为可重试。重试会复用已经上传的私有对象并重新进入 Redis 队列，不会要求浏览器再次上传文件。恶意文件、格式错误和衍生图生成失败不自动重试。
+
+## 媒体清理
+
+| 错误代码/现象 | 含义 | 处理方式 |
+|---|---|---|
+| `MEDIA_CLEANUP_LIMIT_INVALID` | 手动清理命令的 `--limit` 小于等于 0 | 改用正整数，例如 `--limit 100` |
+| 清理结果包含 `failures` | 删除 MinIO 对象时发生可识别错误 | 根据其中的 `asset_id`、`code` 和 `message` 排查存储服务，再次运行清理 |
+
+只清理签名地址已经过期且状态仍为 `pending` 的任务。`processing`、`ready`、`failed` 和真实旅行记忆不会被自动删除。手动执行：
+
+```powershell
+cd api
+.\.venv\Scripts\python.exe -m app.media_cleanup --limit 100
+```
 
 ## 本地基础设施
 
@@ -105,7 +136,11 @@
 docker compose --env-file .env -f infra/compose.yml ps
 docker compose --env-file .env -f infra/compose.yml exec redis redis-cli ping
 Invoke-WebRequest -UseBasicParsing http://127.0.0.1:9000/minio/health/live
+cd api
+.\.venv\Scripts\python.exe scripts\media_pipeline_smoke.py
 ```
+
+媒体功能需要单独运行 worker：在项目根目录执行 `.\worker\run.ps1`。诊断单个队列任务可执行 `.\worker\run.ps1 --once`；若输出 `worker_idle no_job=true`，表示正式队列当前为空，不是错误。
 
 ## 当前已知阻塞
 

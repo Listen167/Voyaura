@@ -16,13 +16,23 @@ import {
   Trash2,
   X,
 } from 'lucide-vue-next'
-import type { AppErrorInfo, CityMemoryDetail, CityMemoryItem, VisitedCity } from '../types'
+import type {
+  AppErrorInfo,
+  CityMemoryDetail,
+  CityMemoryItem,
+  MediaTaskItem,
+  MemoryMediaAsset,
+  VisitedCity,
+} from '../types'
 
 defineProps<{
   city: VisitedCity
   phase: 'loading' | 'ready' | 'error'
   detail: CityMemoryDetail | null
   error: AppErrorInfo | null
+  mediaTasks: MediaTaskItem[]
+  mediaTaskBusyId: string | null
+  mediaTaskError: AppErrorInfo | null
 }>()
 
 defineEmits<{
@@ -33,6 +43,8 @@ defineEmits<{
   editMemory: [memory: CityMemoryItem]
   deleteMemory: [memory: CityMemoryItem]
   uploadMedia: [memory: CityMemoryItem]
+  retryMedia: [task: MediaTaskItem]
+  deleteMedia: [memoryId: string, asset: MemoryMediaAsset | MediaTaskItem]
 }>()
 
 const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
@@ -44,6 +56,12 @@ const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
 function formatDate(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '日期未知' : dateFormatter.format(date)
+}
+
+function mediaTaskLabel(task: MediaTaskItem): string {
+  if (task.upload_status === 'processing') return '安全处理中'
+  if (task.upload_status === 'failed') return '处理失败'
+  return task.expired ? '上传已过期' : '等待上传完成'
 }
 </script>
 
@@ -98,6 +116,33 @@ function formatDate(value: string): string {
 
         <p v-if="detail.visit_note" class="visit-note"><FileText :size="16" />{{ detail.visit_note }}</p>
 
+        <section v-if="mediaTasks.length || mediaTaskError" class="media-task-section" aria-labelledby="media-task-title">
+          <header>
+            <div><AlertTriangle :size="15" /><h3 id="media-task-title">媒体任务</h3></div>
+            <span>{{ mediaTasks.length }}</span>
+          </header>
+          <p v-if="mediaTaskError" class="media-task-error" role="alert">
+            <span>{{ mediaTaskError.message }}</span><code>{{ mediaTaskError.code }}</code>
+          </p>
+          <ul v-if="mediaTasks.length">
+            <li v-for="task in mediaTasks" :key="task.asset_id">
+              <span class="media-task-kind"><Camera v-if="task.kind === 'photo'" :size="16" /><Film v-else :size="16" /></span>
+              <span class="media-task-copy">
+                <strong>{{ task.original_filename }}</strong>
+                <small>{{ task.memory_title }} · {{ mediaTaskLabel(task) }}</small>
+                <code v-if="task.failure_code">{{ task.failure_code }}</code>
+              </span>
+              <span class="media-task-actions">
+                <LoaderCircle v-if="mediaTaskBusyId === task.asset_id" class="spin" :size="17" />
+                <template v-else>
+                  <button v-if="task.upload_status === 'failed' && task.retryable" type="button" title="重试媒体处理" aria-label="重试媒体处理" @click="$emit('retryMedia', task)"><RefreshCw :size="14" /></button>
+                  <button v-if="task.upload_status !== 'processing'" class="danger" type="button" title="删除媒体任务" aria-label="删除媒体任务" @click="$emit('deleteMedia', task.memory_id, task)"><Trash2 :size="14" /></button>
+                </template>
+              </span>
+            </li>
+          </ul>
+        </section>
+
         <section v-if="detail.memories.length" class="memory-timeline" aria-label="城市记忆时间线">
           <article v-for="memory in detail.memories" :key="memory.id">
             <time :datetime="memory.occurred_at">{{ formatDate(memory.occurred_at) }}</time>
@@ -114,9 +159,28 @@ function formatDate(value: string): string {
               <p v-if="memory.body">{{ memory.body }}</p>
               <ul v-if="memory.media.length" class="memory-media-list">
                 <li v-for="asset in memory.media" :key="asset.id">
-                  <Camera v-if="asset.kind === 'photo'" :size="15" />
-                  <Film v-else :size="15" />
-                  <span>{{ asset.original_filename }}</span>
+                  <button class="memory-media-delete" type="button" :title="`删除 ${asset.original_filename}`" :aria-label="`删除 ${asset.original_filename}`" @click="$emit('deleteMedia', memory.id, asset)"><Trash2 :size="13" /></button>
+                  <a
+                    v-if="asset.content_url"
+                    class="memory-media-preview"
+                    :href="asset.content_url"
+                    target="_blank"
+                    rel="noreferrer"
+                    :aria-label="`查看 ${asset.original_filename}`"
+                  >
+                    <img
+                      v-if="asset.thumbnail_url"
+                      :src="asset.thumbnail_url"
+                      :alt="asset.kind === 'photo' ? asset.original_filename : `${asset.original_filename} 视频封面`"
+                    />
+                    <span v-else><Camera v-if="asset.kind === 'photo'" :size="18" /><Film v-else :size="18" /></span>
+                    <Film v-if="asset.kind === 'vlog'" class="memory-video-mark" :size="16" />
+                  </a>
+                  <span v-else class="memory-media-preview"><Camera v-if="asset.kind === 'photo'" :size="18" /><Film v-else :size="18" /></span>
+                  <span class="memory-media-caption">
+                    <strong>{{ asset.original_filename }}</strong>
+                    <small>{{ asset.kind === 'photo' ? '照片' : 'Vlog 封面' }} · 安全扫描已完成</small>
+                  </span>
                 </li>
               </ul>
             </div>

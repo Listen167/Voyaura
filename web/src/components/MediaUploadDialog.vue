@@ -4,17 +4,20 @@ import {
   Camera,
   Check,
   Film,
+  FolderOpen,
   ImagePlus,
   LoaderCircle,
   LockKeyhole,
   RefreshCw,
   Upload,
+  Video,
   X,
 } from 'lucide-vue-next'
 import { onBeforeUnmount, ref, watch } from 'vue'
 import type {
   AppErrorInfo,
   CityMemoryItem,
+  MediaUploadProgress,
   MediaUploadPreview,
   VisitedCity,
 } from '../types'
@@ -22,9 +25,10 @@ import type {
 const props = defineProps<{
   city: VisitedCity
   memory: CityMemoryItem
-  phase: 'selecting' | 'preview' | 'uploading' | 'success' | 'error'
+  phase: 'selecting' | 'preview' | 'uploading' | 'processing' | 'success' | 'error'
   file: File | null
   preview: MediaUploadPreview | null
+  uploadProgress: MediaUploadProgress
   error: AppErrorInfo | null
 }>()
 
@@ -32,11 +36,14 @@ const emit = defineEmits<{
   cancel: []
   preview: [file: File]
   confirm: []
+  cancelUpload: []
   retry: []
   edit: []
 }>()
 
-const fileInput = ref<HTMLInputElement | null>(null)
+const photoInput = ref<HTMLInputElement | null>(null)
+const videoInput = ref<HTMLInputElement | null>(null)
+const libraryInput = ref<HTMLInputElement | null>(null)
 const selectedFile = ref<File | null>(props.file)
 const objectUrl = ref<string | null>(null)
 
@@ -57,12 +64,15 @@ watch(
 
 onBeforeUnmount(releaseObjectUrl)
 
-function chooseFile() {
-  fileInput.value?.click()
+function chooseSource(input: HTMLInputElement | null) {
+  if (!input) return
+  input.value = ''
+  input.click()
 }
 
 function onFileChange(event: Event) {
-  selectedFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
+  const input = event.target as HTMLInputElement
+  selectedFile.value = input.files?.[0] ?? null
 }
 
 function submitPreview() {
@@ -70,6 +80,7 @@ function submitPreview() {
 }
 
 function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 KB'
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
@@ -88,17 +99,38 @@ function formatBytes(bytes: number): string {
 
       <form v-if="phase === 'selecting'" class="media-file-picker" @submit.prevent="submitPreview">
         <input
-          ref="fileInput"
+          ref="photoInput"
+          class="visually-hidden"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          capture="environment"
+          @change="onFileChange"
+        />
+        <input
+          ref="videoInput"
+          class="visually-hidden"
+          type="file"
+          accept="video/mp4,video/quicktime,video/webm"
+          capture="environment"
+          @change="onFileChange"
+        />
+        <input
+          ref="libraryInput"
           class="visually-hidden"
           type="file"
           accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"
           @change="onFileChange"
         />
-        <button class="media-pick-button" type="button" @click="chooseFile">
-          <ImagePlus :size="28" />
-          <strong>{{ selectedFile ? selectedFile.name : '选择照片或视频' }}</strong>
-          <small>{{ selectedFile ? formatBytes(selectedFile.size) : 'JPEG / PNG / WebP / MP4 / MOV / WebM' }}</small>
-        </button>
+        <div class="media-source-grid" aria-label="媒体来源">
+          <button type="button" @click="chooseSource(photoInput)"><Camera :size="24" /><strong>拍照</strong></button>
+          <button type="button" @click="chooseSource(videoInput)"><Video :size="24" /><strong>录像</strong></button>
+          <button type="button" @click="chooseSource(libraryInput)"><FolderOpen :size="24" /><strong>相册或文件</strong></button>
+        </div>
+        <div v-if="selectedFile" class="media-selected-file">
+          <ImagePlus :size="22" />
+          <span><strong>{{ selectedFile.name }}</strong><small>{{ formatBytes(selectedFile.size) }}</small></span>
+        </div>
+        <p v-else class="media-format-note">JPEG / PNG / WebP / MP4 / MOV / WebM</p>
         <div class="media-memory-context">
           <span>{{ memory.title }}</span>
           <small>{{ city.name_zh }} · 文件默认仅自己可见</small>
@@ -128,9 +160,25 @@ function formatBytes(bytes: number): string {
       </div>
 
       <div v-else-if="phase === 'uploading'" class="media-upload-state" aria-live="polite">
+        <strong>正在上传私有文件</strong>
+        <div class="media-upload-progress">
+          <div
+            role="progressbar"
+            aria-label="媒体上传进度"
+            :aria-valuenow="uploadProgress.percent"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          ><span :style="{ width: `${uploadProgress.percent}%` }"></span></div>
+          <p><strong>{{ uploadProgress.percent }}%</strong><span>{{ formatBytes(uploadProgress.loaded) }} / {{ formatBytes(uploadProgress.total) }}</span></p>
+        </div>
+        <p>上传完成后会校验格式并移除照片 EXIF 信息。</p>
+        <button type="button" class="media-upload-cancel" @click="emit('cancelUpload')"><X :size="15" />取消上传</button>
+      </div>
+
+      <div v-else-if="phase === 'processing'" class="media-upload-state" aria-live="polite">
         <LoaderCircle class="spin" :size="31" />
-        <strong>正在安全上传</strong>
-        <p>完成后将校验文件并移除照片 EXIF 信息。</p>
+        <strong>正在安全扫描并生成预览</strong>
+        <p>图片缩略图或视频封面完成后，文件才会加入城市记忆。</p>
       </div>
 
       <div v-else-if="phase === 'success'" class="media-upload-state success" aria-live="polite">

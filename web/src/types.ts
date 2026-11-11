@@ -82,6 +82,11 @@ export interface MemoryMediaAsset {
   visibility: 'private'
   upload_status: 'ready'
   exif_status: 'removed' | 'not_applicable'
+  scan_status: 'clean' | 'not_scanned'
+  thumbnail_url: string | null
+  content_url: string | null
+  thumbnail_width: number | null
+  thumbnail_height: number | null
   created_at: string
 }
 
@@ -188,9 +193,73 @@ export interface MediaUploadIntent {
   expires_at: string
 }
 
+export interface MediaUploadProgress {
+  loaded: number
+  total: number
+  percent: number
+}
+
 export interface MediaUploadCompleteResult {
-  status: 'ready' | 'existing'
-  asset: MemoryMediaAsset
+  status: 'processing' | 'ready' | 'existing'
+  asset_id: string
+  asset: MemoryMediaAsset | null
+  processing_notice: string
+}
+
+export interface MediaProcessingStatus {
+  status: 'pending' | 'processing' | 'ready' | 'failed'
+  asset_id: string
+  scan_status: 'not_scanned' | 'pending' | 'scanning' | 'clean' | 'infected' | 'error'
+  failure_code: string | null
+  failure_message: string | null
+  retryable: boolean
+  asset: MemoryMediaAsset | null
+}
+
+export interface MediaTaskItem {
+  asset_id: string
+  memory_id: string
+  memory_title: string
+  kind: 'photo' | 'vlog'
+  original_filename: string
+  byte_size: number
+  upload_status: 'pending' | 'processing' | 'failed'
+  scan_status: 'not_scanned' | 'pending' | 'scanning' | 'clean' | 'infected' | 'error'
+  failure_code: string | null
+  failure_message: string | null
+  retryable: boolean
+  expired: boolean
+  upload_expires_at: string | null
+  created_at: string
+}
+
+export interface MediaTaskList {
+  items: MediaTaskItem[]
+}
+
+export interface MediaDeleteDraft {
+  username: string
+  client_request_id: string
+}
+
+export interface MediaDeletePreview {
+  asset_id: string
+  memory_id: string
+  city_adcode: string
+  city_name: string
+  memory_title: string
+  kind: 'photo' | 'vlog'
+  original_filename: string
+  byte_size: number
+  upload_status: 'pending' | 'ready' | 'failed'
+  confirmation_notice: string
+}
+
+export interface MediaDeleteConfirmResult {
+  status: 'deleted' | 'existing'
+  asset_id: string
+  memory_id: string
+  city_adcode: string
 }
 
 export interface AppErrorInfo {

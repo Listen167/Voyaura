@@ -1,7 +1,8 @@
 import uuid
 from collections.abc import Generator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,9 +14,13 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.errors import AppError
 from app.integrations.amap import ResolvedCity, get_amap_client
+from app.integrations.media_queue import get_media_queue
+from app.integrations.media_scanner import ScanResult
 from app.integrations.media_storage import StoredObject, get_media_storage
 from app.main import app
-from app.models import City, CityMemory, MediaAsset, MemoryMutation, User
+from app.media_cleanup import cleanup_expired_media_uploads
+from app.media_jobs import process_media_asset
+from app.models import City, CityMemory, MediaAsset, MediaMutation, MemoryMutation, User
 
 engine = create_engine(
     "sqlite://",
@@ -63,6 +68,9 @@ class FakeMediaStorage:
         self.last_key = storage_key
         return f"http://storage.test/{storage_key}?expires={int(expires.total_seconds())}"
 
+    def presigned_get(self, storage_key: str, expires: timedelta) -> str:
+        return f"http://storage.test/{storage_key}?expires={int(expires.total_seconds())}"
+
     def stat(self, storage_key: str) -> StoredObject:
         if storage_key not in self.objects:
             raise AppError("MEDIA_OBJECT_NOT_FOUND", "对象不存在。", status_code=409)
@@ -81,12 +89,44 @@ class FakeMediaStorage:
     def replace(self, storage_key: str, data: bytes, *, content_type: str) -> None:
         self.objects[storage_key] = (data, content_type)
 
+    def download_to_file(self, storage_key: str, path: str, *, max_bytes: int) -> None:
+        data = self.read(storage_key, max_bytes=max_bytes)
+        Path(path).write_bytes(data)
+
+    def upload_file(self, storage_key: str, path: str, *, content_type: str) -> None:
+        self.objects[storage_key] = (Path(path).read_bytes(), content_type)
+
     def remove(self, storage_key: str) -> None:
         self.objects.pop(storage_key, None)
 
 
 fake_media_storage = FakeMediaStorage()
 app.dependency_overrides[get_media_storage] = lambda: fake_media_storage
+
+
+class FakeMediaJobQueue:
+    def __init__(self) -> None:
+        self.jobs: list[str] = []
+
+    def enqueue(self, asset_id: str) -> None:
+        if asset_id not in self.jobs:
+            self.jobs.append(asset_id)
+
+
+class CleanMediaScanner:
+    def scan(self, path: str) -> ScanResult:
+        assert Path(path).is_file()
+        return ScanResult(infected=False)
+
+
+class InfectedMediaScanner:
+    def scan(self, path: str) -> ScanResult:
+        assert Path(path).is_file()
+        return ScanResult(infected=True, threat_name="test-signature")
+
+
+fake_media_queue = FakeMediaJobQueue()
+app.dependency_overrides[get_media_queue] = lambda: fake_media_queue
 
 
 @pytest.fixture(autouse=True)
@@ -104,6 +144,7 @@ def reset_database() -> Generator[None, None, None]:
         )
     fake_media_storage.objects.clear()
     fake_media_storage.last_key = None
+    fake_media_queue.jobs.clear()
     yield
 
 
@@ -460,7 +501,7 @@ def test_media_upload_preview_is_read_only() -> None:
         assert db.scalar(select(func.count()).select_from(MediaAsset)) == 0
 
 
-def test_photo_upload_removes_exif_and_complete_is_idempotent() -> None:
+def test_photo_upload_is_scanned_and_creates_private_thumbnail() -> None:
     memory_id = create_memory_for_media()
     image = Image.new("RGB", (32, 24), "#d65d45")
     exif = Image.Exif()
@@ -499,21 +540,95 @@ def test_photo_upload_removes_exif_and_complete_is_idempotent() -> None:
         f"/api/v1/cities/440100/memories/{memory_id}/media/{asset_id}/complete"
     )
     completed = client.post(complete_url, json={"username": "AuroraRovella"})
-    existing = client.post(complete_url, json={"username": "AuroraRovella"})
 
     assert completed.status_code == 200
-    assert completed.json()["status"] == "ready"
-    assert completed.json()["asset"]["exif_status"] == "removed"
-    assert completed.json()["asset"]["width"] == 32
-    assert completed.json()["asset"]["height"] == 24
-    assert existing.json()["status"] == "existing"
+    assert completed.json()["status"] == "processing"
+    assert completed.json()["asset"] is None
+    assert fake_media_queue.jobs == [asset_id]
     sanitized = fake_media_storage.objects[fake_media_storage.last_key][0]
     with Image.open(BytesIO(sanitized)) as result:
         assert len(result.getexif()) == 0
 
+    assert process_media_asset(
+        asset_id,
+        storage=fake_media_storage,
+        scanner=CleanMediaScanner(),
+        session_factory=TestingSession,
+    ) == "ready"
+    status = client.get(
+        f"/api/v1/cities/440100/memories/{memory_id}/media/{asset_id}/status"
+    )
+    existing = client.post(complete_url, json={"username": "AuroraRovella"})
+
+    assert status.status_code == 200
+    assert status.json()["status"] == "ready"
+    assert status.json()["scan_status"] == "clean"
+    assert status.json()["asset"]["exif_status"] == "removed"
+    assert status.json()["asset"]["width"] == 32
+    assert status.json()["asset"]["height"] == 24
+    assert status.json()["asset"]["thumbnail_width"] == 32
+    assert status.json()["asset"]["thumbnail_height"] == 24
+    assert "thumbnail.webp" in status.json()["asset"]["thumbnail_url"]
+    assert existing.json()["status"] == "existing"
+    thumbnail_key = next(key for key in fake_media_storage.objects if key.endswith("thumbnail.webp"))
+    thumbnail, thumbnail_type = fake_media_storage.objects[thumbnail_key]
+    assert thumbnail_type == "image/webp"
+    with Image.open(BytesIO(thumbnail)) as result:
+        assert result.format == "WEBP"
+
     detail = client.get("/api/v1/cities/440100/memories").json()
     assert detail["stats"]["photos"] == 1
     assert detail["memories"][0]["media"][0]["visibility"] == "private"
+    assert detail["memories"][0]["media"][0]["thumbnail_url"].startswith(
+        "http://storage.test/"
+    )
+
+
+def test_infected_photo_is_removed_and_reports_stable_failure() -> None:
+    memory_id = create_memory_for_media()
+    source = BytesIO()
+    Image.new("RGB", (12, 10), "white").save(source, format="JPEG")
+    original = source.getvalue()
+    payload = {
+        "username": "AuroraRovella",
+        "client_request_id": str(uuid.uuid4()),
+        "kind": "photo",
+        "filename": "unsafe.jpg",
+        "mime_type": "image/jpeg",
+        "byte_size": len(original),
+        "visibility": "private",
+    }
+    intent = client.post(
+        f"/api/v1/cities/440100/memories/{memory_id}/media/upload-intents",
+        json=payload,
+    )
+    storage_key = fake_media_storage.last_key
+    assert storage_key is not None
+    fake_media_storage.objects[storage_key] = (original, "image/jpeg")
+    asset_id = intent.json()["asset_id"]
+    completed = client.post(
+        f"/api/v1/cities/440100/memories/{memory_id}/media/{asset_id}/complete",
+        json={"username": "AuroraRovella"},
+    )
+
+    assert completed.json()["status"] == "processing"
+    assert process_media_asset(
+        asset_id,
+        storage=fake_media_storage,
+        scanner=InfectedMediaScanner(),
+        session_factory=TestingSession,
+    ) == "infected"
+    status = client.get(
+        f"/api/v1/cities/440100/memories/{memory_id}/media/{asset_id}/status"
+    )
+
+    assert storage_key not in fake_media_storage.objects
+    assert status.json()["status"] == "failed"
+    assert status.json()["scan_status"] == "infected"
+    assert status.json()["failure_code"] == "MEDIA_MALWARE_DETECTED"
+    assert status.json()["failure_message"] == "媒体文件未通过安全扫描。"
+    assert status.json()["retryable"] is False
+    assert status.json()["asset"] is None
 
 
 def test_photo_upload_rejects_mismatched_file_content() -> None:
@@ -554,13 +669,16 @@ def test_photo_upload_rejects_mismatched_file_content() -> None:
 def test_memory_delete_removes_owned_storage_objects() -> None:
     memory_id = create_memory_for_media()
     storage_key = "tests/guangzhou/private-photo.jpg"
+    thumbnail_key = "tests/guangzhou/thumbnail.webp"
     fake_media_storage.objects[storage_key] = (b"private", "image/jpeg")
+    fake_media_storage.objects[thumbnail_key] = (b"preview", "image/webp")
     with TestingSession.begin() as db:
         db.add(
             MediaAsset(
                 memory_id=uuid.UUID(memory_id),
                 kind="photo",
                 storage_key=storage_key,
+                thumbnail_key=thumbnail_key,
                 original_filename="private-photo.jpg",
                 mime_type="image/jpeg",
                 byte_size=7,
@@ -581,6 +699,164 @@ def test_memory_delete_removes_owned_storage_objects() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "deleted"
     assert storage_key not in fake_media_storage.objects
+    assert thumbnail_key not in fake_media_storage.objects
+
+
+def test_media_delete_requires_preview_removes_objects_and_is_idempotent() -> None:
+    memory_id = create_memory_for_media()
+    asset_id = uuid.uuid4()
+    storage_key = "tests/guangzhou/delete-photo.jpg"
+    thumbnail_key = "tests/guangzhou/delete-thumbnail.webp"
+    fake_media_storage.objects[storage_key] = (b"private", "image/jpeg")
+    fake_media_storage.objects[thumbnail_key] = (b"preview", "image/webp")
+    with TestingSession.begin() as db:
+        db.add(
+            MediaAsset(
+                id=asset_id,
+                memory_id=uuid.UUID(memory_id),
+                kind="photo",
+                storage_key=storage_key,
+                thumbnail_key=thumbnail_key,
+                original_filename="delete-photo.jpg",
+                mime_type="image/jpeg",
+                byte_size=7,
+                upload_status="ready",
+                exif_status="removed",
+                scan_status="clean",
+            )
+        )
+    payload = {
+        "username": "AuroraRovella",
+        "client_request_id": str(uuid.uuid4()),
+    }
+    base_url = f"/api/v1/cities/440100/memories/{memory_id}/media/{asset_id}"
+
+    preview = client.post(f"{base_url}/delete-preview", json=payload)
+    before_confirm = client.get("/api/v1/cities/440100/memories").json()
+    deleted = client.post(f"{base_url}/delete-confirm", json=payload)
+    existing = client.post(f"{base_url}/delete-confirm", json=payload)
+
+    assert preview.status_code == 200
+    assert preview.json()["original_filename"] == "delete-photo.jpg"
+    assert preview.json()["upload_status"] == "ready"
+    assert before_confirm["stats"]["photos"] == 1
+    assert deleted.json()["status"] == "deleted"
+    assert existing.json()["status"] == "existing"
+    assert storage_key not in fake_media_storage.objects
+    assert thumbnail_key not in fake_media_storage.objects
+    with TestingSession() as db:
+        assert db.get(MediaAsset, asset_id) is None
+        assert db.scalar(select(func.count()).select_from(MediaMutation)) == 1
+
+
+def test_failed_media_task_can_retry_but_processing_asset_cannot_be_deleted() -> None:
+    memory_id = create_memory_for_media()
+    asset_id = uuid.uuid4()
+    storage_key = "tests/guangzhou/retry-photo.jpg"
+    source = BytesIO()
+    Image.new("RGB", (18, 12), "#d65d45").save(source, format="JPEG")
+    fake_media_storage.objects[storage_key] = (source.getvalue(), "image/jpeg")
+    with TestingSession.begin() as db:
+        db.add(
+            MediaAsset(
+                id=asset_id,
+                memory_id=uuid.UUID(memory_id),
+                kind="photo",
+                storage_key=storage_key,
+                original_filename="retry-photo.jpg",
+                mime_type="image/jpeg",
+                byte_size=len(source.getvalue()),
+                upload_status="failed",
+                exif_status="removed",
+                scan_status="error",
+                failure_code="MEDIA_SCANNER_UNAVAILABLE",
+                processing_error="扫描器暂时不可用。",
+            )
+        )
+
+    tasks = client.get("/api/v1/cities/440100/media/tasks").json()["items"]
+    retried = client.post(
+        f"/api/v1/cities/440100/memories/{memory_id}/media/{asset_id}/complete",
+        json={"username": "AuroraRovella"},
+    )
+    delete_while_processing = client.post(
+        f"/api/v1/cities/440100/memories/{memory_id}/media/{asset_id}/delete-preview",
+        json={"username": "AuroraRovella", "client_request_id": str(uuid.uuid4())},
+    )
+
+    assert tasks[0]["failure_code"] == "MEDIA_SCANNER_UNAVAILABLE"
+    assert tasks[0]["retryable"] is True
+    assert retried.json()["status"] == "processing"
+    assert fake_media_queue.jobs == [str(asset_id)]
+    assert delete_while_processing.status_code == 409
+    assert delete_while_processing.json()["error"]["code"] == (
+        "MEDIA_DELETE_PROCESSING_CONFLICT"
+    )
+    assert delete_while_processing.json()["error"]["retryable"] is True
+
+    assert process_media_asset(
+        asset_id,
+        storage=fake_media_storage,
+        scanner=CleanMediaScanner(),
+        session_factory=TestingSession,
+    ) == "ready"
+    assert client.get("/api/v1/cities/440100/media/tasks").json()["items"] == []
+
+
+def test_cleanup_removes_only_expired_pending_uploads() -> None:
+    memory_id = create_memory_for_media()
+    now = datetime.now(UTC)
+    expired_id = uuid.uuid4()
+    active_id = uuid.uuid4()
+    expired_key = "tests/guangzhou/expired.jpg"
+    active_key = "tests/guangzhou/active.jpg"
+    fake_media_storage.objects[expired_key] = (b"expired", "image/jpeg")
+    fake_media_storage.objects[active_key] = (b"active", "image/jpeg")
+    with TestingSession.begin() as db:
+        db.add_all(
+            [
+                MediaAsset(
+                    id=expired_id,
+                    memory_id=uuid.UUID(memory_id),
+                    kind="photo",
+                    storage_key=expired_key,
+                    original_filename="expired.jpg",
+                    mime_type="image/jpeg",
+                    byte_size=7,
+                    upload_status="pending",
+                    exif_status="pending_removal",
+                    upload_expires_at=now - timedelta(minutes=1),
+                ),
+                MediaAsset(
+                    id=active_id,
+                    memory_id=uuid.UUID(memory_id),
+                    kind="photo",
+                    storage_key=active_key,
+                    original_filename="active.jpg",
+                    mime_type="image/jpeg",
+                    byte_size=6,
+                    upload_status="pending",
+                    exif_status="pending_removal",
+                    upload_expires_at=now + timedelta(minutes=10),
+                ),
+            ]
+        )
+
+    summary = cleanup_expired_media_uploads(
+        storage=fake_media_storage,
+        session_factory=TestingSession,
+        now=now,
+        limit=10,
+    )
+
+    assert summary.scanned == 1
+    assert summary.deleted == 1
+    assert summary.failures == []
+    assert expired_key not in fake_media_storage.objects
+    assert active_key in fake_media_storage.objects
+    with TestingSession() as db:
+        assert db.get(MediaAsset, expired_id) is None
+        assert db.get(MediaAsset, active_id) is not None
 
 
 def test_unvisited_city_memory_error_is_actionable() -> None:

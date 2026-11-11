@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi import Path as ApiPath
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -14,11 +15,18 @@ from app.config import settings
 from app.database import get_db
 from app.errors import AppError
 from app.integrations.media_processing import sanitize_image, validate_video_prefix
+from app.integrations.media_queue import MediaJobQueue, get_media_queue
 from app.integrations.media_storage import MediaStorage, get_media_storage
-from app.models import CityMemory, MediaAsset
+from app.models import CityMemory, MediaAsset, MediaMutation
 from app.routers.city_memories import require_memory, require_visited_city
 from app.schemas import (
     MediaAssetOut,
+    MediaDeleteConfirmOut,
+    MediaDeleteDraft,
+    MediaDeletePreviewOut,
+    MediaProcessingStatusOut,
+    MediaTaskListOut,
+    MediaTaskOut,
     MediaUploadCompleteDraft,
     MediaUploadCompleteOut,
     MediaUploadDraft,
@@ -27,6 +35,13 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/cities", tags=["media-uploads"])
+
+RETRYABLE_PROCESSING_ERRORS = {
+    "MEDIA_QUEUE_UNAVAILABLE",
+    "MEDIA_SCANNER_UNAVAILABLE",
+    "MEDIA_STORAGE_UNAVAILABLE",
+    "MEDIA_PROCESSING_ERROR",
+}
 
 MEDIA_RULES: dict[str, dict[str, tuple[str, ...]]] = {
     "photo": {
@@ -101,6 +116,7 @@ def reserved_bytes(db: Session, user_id: uuid.UUID) -> int:
             CityMemory.user_id == user_id,
             or_(
                 MediaAsset.upload_status == "ready",
+                MediaAsset.upload_status == "processing",
                 and_(
                     MediaAsset.upload_status == "pending",
                     or_(
@@ -130,7 +146,8 @@ def check_quota(db: Session, *, user_id: uuid.UUID, requested_bytes: int) -> int
     return settings.media_user_quota_bytes - used_bytes - requested_bytes
 
 
-def media_out(asset: MediaAsset) -> MediaAssetOut:
+def media_out(asset: MediaAsset, storage: MediaStorage | None = None) -> MediaAssetOut:
+    expires = timedelta(minutes=settings.media_upload_ttl_minutes)
     return MediaAssetOut(
         id=asset.id,
         kind=asset.kind,
@@ -142,6 +159,17 @@ def media_out(asset: MediaAsset) -> MediaAssetOut:
         visibility=asset.visibility,
         upload_status="ready",
         exif_status=asset.exif_status,
+        scan_status=asset.scan_status,
+        thumbnail_url=(
+            storage.presigned_get(asset.thumbnail_key, expires)
+            if storage is not None and asset.thumbnail_key
+            else None
+        ),
+        content_url=(
+            storage.presigned_get(asset.storage_key, expires) if storage is not None else None
+        ),
+        thumbnail_width=asset.thumbnail_width,
+        thumbnail_height=asset.thumbnail_height,
         created_at=asset.created_at,
     )
 
@@ -159,10 +187,15 @@ def require_asset(
     *,
     memory_id: uuid.UUID,
     asset_id: uuid.UUID,
+    lock: bool = False,
 ) -> MediaAsset:
-    asset = db.scalar(
-        select(MediaAsset).where(MediaAsset.id == asset_id, MediaAsset.memory_id == memory_id)
+    statement = select(MediaAsset).where(
+        MediaAsset.id == asset_id,
+        MediaAsset.memory_id == memory_id,
     )
+    if lock:
+        statement = statement.with_for_update()
+    asset = db.scalar(statement)
     if asset is None:
         raise AppError(
             "MEDIA_ASSET_NOT_FOUND",
@@ -171,6 +204,55 @@ def require_asset(
             details={"asset_id": str(asset_id), "memory_id": str(memory_id)},
         )
     return asset
+
+
+def media_delete_hash(memory_id: uuid.UUID, asset_id: uuid.UUID) -> str:
+    return hashlib.sha256(f"delete:{memory_id}:{asset_id}".encode()).hexdigest()
+
+
+def matching_media_mutation(
+    db: Session,
+    *,
+    user_id: uuid.UUID,
+    city_id: uuid.UUID,
+    memory_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    client_request_id: uuid.UUID,
+    payload_hash: str,
+) -> MediaMutation | None:
+    mutation = db.scalar(
+        select(MediaMutation).where(
+            MediaMutation.user_id == user_id,
+            MediaMutation.client_request_id == client_request_id,
+        )
+    )
+    if mutation is None:
+        return None
+    if (
+        mutation.city_id != city_id
+        or mutation.target_memory_id != memory_id
+        or mutation.target_asset_id != asset_id
+        or mutation.operation != "delete"
+        or mutation.payload_hash != payload_hash
+    ):
+        raise AppError(
+            "MEDIA_MUTATION_IDEMPOTENCY_CONFLICT",
+            "该请求编号已经用于另一项媒体操作。",
+            status_code=409,
+            details={"client_request_id": str(client_request_id)},
+        )
+    return mutation
+
+
+def ensure_asset_deletable(asset: MediaAsset) -> None:
+    if asset.upload_status == "processing":
+        raise AppError(
+            "MEDIA_DELETE_PROCESSING_CONFLICT",
+            "媒体仍在安全处理中，请处理完成后再删除。",
+            status_code=409,
+            details={"asset_id": str(asset.id)},
+            retryable=True,
+        )
 
 
 def reject_upload(
@@ -316,13 +398,29 @@ def complete_media_upload(
     payload: MediaUploadCompleteDraft,
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[MediaStorage, Depends(get_media_storage)],
+    queue: Annotated[MediaJobQueue, Depends(get_media_queue)],
 ) -> MediaUploadCompleteOut:
     user, city, _ = require_visited_city(db, username=payload.username, adcode=adcode)
     require_memory(db, user=user, city=city, memory_id=memory_id)
-    asset = require_asset(db, memory_id=memory_id, asset_id=asset_id)
+    asset = require_asset(db, memory_id=memory_id, asset_id=asset_id, lock=True)
     if asset.upload_status == "ready":
-        return MediaUploadCompleteOut(status="existing", asset=media_out(asset))
+        return MediaUploadCompleteOut(
+            status="existing",
+            asset_id=asset.id,
+            asset=media_out(asset, storage),
+        )
+    if asset.upload_status == "processing":
+        queue.enqueue(str(asset.id))
+        return MediaUploadCompleteOut(status="processing", asset_id=asset.id)
     if asset.upload_status == "failed":
+        if asset.failure_code in RETRYABLE_PROCESSING_ERRORS:
+            asset.upload_status = "processing"
+            asset.scan_status = "pending"
+            asset.failure_code = None
+            asset.processing_error = None
+            db.commit()
+            queue.enqueue(str(asset.id))
+            return MediaUploadCompleteOut(status="processing", asset_id=asset.id)
         raise AppError(
             "MEDIA_UPLOAD_FAILED_STATE",
             "该上传任务已失败，请重新选择文件并创建新的上传任务。",
@@ -383,9 +481,172 @@ def complete_media_upload(
             reject_upload(db, storage, asset, exc)
         raise
 
-    asset.upload_status = "ready"
+    asset.upload_status = "processing"
+    asset.scan_status = "pending"
     asset.failure_code = None
+    asset.processing_error = None
     asset.uploaded_at = datetime.now(UTC)
     db.commit()
     db.refresh(asset)
-    return MediaUploadCompleteOut(status="ready", asset=media_out(asset))
+    queue.enqueue(str(asset.id))
+    return MediaUploadCompleteOut(status="processing", asset_id=asset.id)
+
+
+@router.get(
+    "/{adcode}/memories/{memory_id}/media/{asset_id}/status",
+    response_model=MediaProcessingStatusOut,
+)
+def get_media_processing_status(
+    adcode: Annotated[str, ApiPath(min_length=6, max_length=12)],
+    memory_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    db: Annotated[Session, Depends(get_db)],
+    storage: Annotated[MediaStorage, Depends(get_media_storage)],
+    username: Annotated[str, Query(min_length=1, max_length=64)] = "AuroraRovella",
+) -> MediaProcessingStatusOut:
+    user, city, _ = require_visited_city(db, username=username, adcode=adcode)
+    require_memory(db, user=user, city=city, memory_id=memory_id)
+    asset = require_asset(db, memory_id=memory_id, asset_id=asset_id)
+    status = asset.upload_status
+    return MediaProcessingStatusOut(
+        status=status,
+        asset_id=asset.id,
+        scan_status=asset.scan_status,
+        failure_code=asset.failure_code,
+        failure_message=asset.processing_error,
+        retryable=asset.failure_code in RETRYABLE_PROCESSING_ERRORS,
+        asset=media_out(asset, storage) if status == "ready" else None,
+    )
+
+
+@router.get("/{adcode}/media/tasks", response_model=MediaTaskListOut)
+def list_media_tasks(
+    adcode: Annotated[str, ApiPath(min_length=6, max_length=12)],
+    db: Annotated[Session, Depends(get_db)],
+    username: Annotated[str, Query(min_length=1, max_length=64)] = "AuroraRovella",
+) -> MediaTaskListOut:
+    user, city, _ = require_visited_city(db, username=username, adcode=adcode)
+    rows = db.execute(
+        select(MediaAsset, CityMemory.title)
+        .join(CityMemory, MediaAsset.memory_id == CityMemory.id)
+        .where(
+            CityMemory.user_id == user.id,
+            CityMemory.city_id == city.id,
+            MediaAsset.upload_status != "ready",
+        )
+        .order_by(MediaAsset.created_at.desc())
+    ).all()
+    now = datetime.now(UTC)
+    return MediaTaskListOut(
+        items=[
+            MediaTaskOut(
+                asset_id=asset.id,
+                memory_id=asset.memory_id,
+                memory_title=memory_title,
+                kind=asset.kind,
+                original_filename=asset.original_filename,
+                byte_size=asset.byte_size,
+                upload_status=asset.upload_status,
+                scan_status=asset.scan_status,
+                failure_code=asset.failure_code,
+                failure_message=asset.processing_error,
+                retryable=asset.failure_code in RETRYABLE_PROCESSING_ERRORS,
+                expired=(
+                    asset.upload_status == "pending"
+                    and asset.upload_expires_at is not None
+                    and aware_utc(asset.upload_expires_at) <= now
+                ),
+                upload_expires_at=asset.upload_expires_at,
+                created_at=asset.created_at,
+            )
+            for asset, memory_title in rows
+        ]
+    )
+
+
+@router.post(
+    "/{adcode}/memories/{memory_id}/media/{asset_id}/delete-preview",
+    response_model=MediaDeletePreviewOut,
+)
+def preview_media_delete(
+    adcode: Annotated[str, ApiPath(min_length=6, max_length=12)],
+    memory_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    payload: MediaDeleteDraft,
+    db: Annotated[Session, Depends(get_db)],
+) -> MediaDeletePreviewOut:
+    user, city, _ = require_visited_city(db, username=payload.username, adcode=adcode)
+    memory = require_memory(db, user=user, city=city, memory_id=memory_id)
+    asset = require_asset(db, memory_id=memory.id, asset_id=asset_id)
+    ensure_asset_deletable(asset)
+    return MediaDeletePreviewOut(
+        asset_id=asset.id,
+        memory_id=memory.id,
+        city_adcode=city.adcode,
+        city_name=city.name_zh,
+        memory_title=memory.title,
+        kind=asset.kind,
+        original_filename=asset.original_filename,
+        byte_size=asset.byte_size,
+        upload_status=asset.upload_status,
+    )
+
+
+@router.post(
+    "/{adcode}/memories/{memory_id}/media/{asset_id}/delete-confirm",
+    response_model=MediaDeleteConfirmOut,
+)
+def confirm_media_delete(
+    adcode: Annotated[str, ApiPath(min_length=6, max_length=12)],
+    memory_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    payload: MediaDeleteDraft,
+    db: Annotated[Session, Depends(get_db)],
+    storage: Annotated[MediaStorage, Depends(get_media_storage)],
+) -> MediaDeleteConfirmOut:
+    user, city, _ = require_visited_city(db, username=payload.username, adcode=adcode)
+    payload_hash = media_delete_hash(memory_id, asset_id)
+    mutation = matching_media_mutation(
+        db,
+        user_id=user.id,
+        city_id=city.id,
+        memory_id=memory_id,
+        asset_id=asset_id,
+        client_request_id=payload.client_request_id,
+        payload_hash=payload_hash,
+    )
+    if mutation is not None:
+        return MediaDeleteConfirmOut(
+            status="existing",
+            asset_id=asset_id,
+            memory_id=memory_id,
+            city_adcode=city.adcode,
+        )
+
+    memory = require_memory(db, user=user, city=city, memory_id=memory_id)
+    asset = require_asset(db, memory_id=memory.id, asset_id=asset_id, lock=True)
+    ensure_asset_deletable(asset)
+    response = MediaDeleteConfirmOut(
+        status="deleted",
+        asset_id=asset.id,
+        memory_id=memory.id,
+        city_adcode=city.adcode,
+    )
+    if asset.thumbnail_key:
+        storage.remove(asset.thumbnail_key)
+    storage.remove(asset.storage_key)
+    db.add(
+        MediaMutation(
+            user_id=user.id,
+            city_id=city.id,
+            target_memory_id=memory.id,
+            target_asset_id=asset.id,
+            client_request_id=payload.client_request_id,
+            operation="delete",
+            payload_hash=payload_hash,
+            response_snapshot=response.model_dump(mode="json"),
+        )
+    )
+    db.delete(asset)
+    db.commit()
+    return response

@@ -22,6 +22,26 @@ class Settings(BaseSettings):
     media_vlog_max_bytes: int = 500 * 1024 * 1024
     media_user_quota_bytes: int = 2 * 1024 * 1024 * 1024
     media_upload_ttl_minutes: int = 15
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    media_queue_key: str = "voyaura:media:jobs"
+    media_scanner_provider: str = "windows_defender"
+    windows_defender_path: str = ""
+    clamav_host: str = "127.0.0.1"
+    clamav_port: int = 3310
+    ffmpeg_path: str = "ffmpeg"
+    ffprobe_path: str = "ffprobe"
+    media_cleanup_interval_seconds: int = 60 * 60
+    media_cleanup_batch_size: int = 100
+    image_provider: str = "disabled"
+    image_queue_key: str = "voyaura:image:jobs"
+    comfyui_base_url: str = "http://127.0.0.1:8188"
+    comfyui_workflow_path: str = ""
+    comfyui_input_node_id: str = ""
+    comfyui_positive_prompt_node_id: str = ""
+    comfyui_negative_prompt_node_id: str = ""
+    comfyui_output_node_id: str = ""
+    comfyui_timeout_seconds: int = 300
+    comfyui_poll_interval_seconds: float = 1.5
 
     model_config = SettingsConfigDict(
         env_file=".env",

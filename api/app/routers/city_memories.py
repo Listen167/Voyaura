@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query
@@ -62,7 +63,7 @@ def require_visited_city(
     return user, city, visit
 
 
-def memory_out(memory: CityMemory) -> CityMemoryItemOut:
+def memory_out(memory: CityMemory, storage: MediaStorage | None = None) -> CityMemoryItemOut:
     return CityMemoryItemOut(
         id=memory.id,
         title=memory.title,
@@ -81,6 +82,22 @@ def memory_out(memory: CityMemory) -> CityMemoryItemOut:
                 visibility=asset.visibility,
                 upload_status="ready",
                 exif_status=asset.exif_status,
+                scan_status=asset.scan_status,
+                thumbnail_url=(
+                    storage.presigned_get(
+                        asset.thumbnail_key,
+                        timedelta(minutes=15),
+                    )
+                    if storage is not None and asset.thumbnail_key
+                    else None
+                ),
+                content_url=(
+                    storage.presigned_get(asset.storage_key, timedelta(minutes=15))
+                    if storage is not None
+                    else None
+                ),
+                thumbnail_width=asset.thumbnail_width,
+                thumbnail_height=asset.thumbnail_height,
                 created_at=asset.created_at,
             )
             for asset in memory.media_assets
@@ -190,6 +207,7 @@ def matching_mutation(
 def get_city_memories(
     adcode: Annotated[str, Path(min_length=6, max_length=12)],
     db: Annotated[Session, Depends(get_db)],
+    storage: Annotated[MediaStorage, Depends(get_media_storage)],
     username: Annotated[str, Query(min_length=1, max_length=64)] = "AuroraRovella",
 ) -> CityMemoryDetailOut:
     user, city, visit = require_visited_city(db, username=username, adcode=adcode)
@@ -201,7 +219,7 @@ def get_city_memories(
         .order_by(CityMemory.occurred_at.desc())
     ).all()
 
-    items = [memory_out(memory) for memory in memories]
+    items = [memory_out(memory, storage) for memory in memories]
     photo_count = sum(asset.kind == "photo" for memory in items for asset in memory.media)
     vlog_assets = [asset for memory in items for asset in memory.media if asset.kind == "vlog"]
     vlog_minutes = round(sum(asset.duration_seconds or 0 for asset in vlog_assets) / 60)
@@ -428,6 +446,8 @@ def confirm_memory_delete(
         )
     )
     for asset in memory.media_assets:
+        if asset.thumbnail_key:
+            storage.remove(asset.thumbnail_key)
         storage.remove(asset.storage_key)
     db.delete(memory)
     db.commit()

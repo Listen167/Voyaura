@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import lru_cache
@@ -49,6 +50,13 @@ class MediaStorage:
             return self.client.presigned_put_object(self.bucket, storage_key, expires=expires)
         except (S3Error, OSError, ValueError) as exc:
             self._unavailable("presign_put", exc)
+
+    def presigned_get(self, storage_key: str, expires: timedelta) -> str:
+        self.ensure_bucket()
+        try:
+            return self.client.presigned_get_object(self.bucket, storage_key, expires=expires)
+        except (S3Error, OSError, ValueError) as exc:
+            self._unavailable("presign_get", exc)
 
     def stat(self, storage_key: str) -> StoredObject:
         try:
@@ -125,6 +133,52 @@ class MediaStorage:
             )
         except (S3Error, OSError) as exc:
             self._unavailable("replace_object", exc)
+
+    def download_to_file(self, storage_key: str, path: str, *, max_bytes: int) -> None:
+        stored = self.stat(storage_key)
+        if stored.size > max_bytes:
+            raise AppError(
+                "MEDIA_FILE_TOO_LARGE",
+                "上传文件超过允许大小。",
+                status_code=413,
+                details={"max_bytes": max_bytes},
+            )
+        response = None
+        try:
+            response = self.client.get_object(self.bucket, storage_key)
+            written = 0
+            with open(path, "wb") as destination:
+                for chunk in response.stream(1024 * 1024):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise AppError(
+                            "MEDIA_FILE_TOO_LARGE",
+                            "上传文件超过允许大小。",
+                            status_code=413,
+                            details={"max_bytes": max_bytes},
+                        )
+                    destination.write(chunk)
+        except AppError:
+            raise
+        except (S3Error, OSError) as exc:
+            self._unavailable("download_object", exc)
+        finally:
+            if response is not None:
+                response.close()
+                response.release_conn()
+
+    def upload_file(self, storage_key: str, path: str, *, content_type: str) -> None:
+        try:
+            with open(path, "rb") as source:
+                self.client.put_object(
+                    self.bucket,
+                    storage_key,
+                    source,
+                    os.path.getsize(path),
+                    content_type=content_type,
+                )
+        except (S3Error, OSError) as exc:
+            self._unavailable("upload_derived_object", exc)
 
     def remove(self, storage_key: str) -> None:
         try:

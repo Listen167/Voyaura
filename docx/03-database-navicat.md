@@ -65,9 +65,19 @@ WHERE username = 'AuroraRovella';
 
 ### media_assets
 
-照片与 Vlog 的媒体元数据，包括对象存储键、原始文件名、MIME 类型、尺寸、视频时长、私有可见性、EXIF 处理状态和上传生命周期。数据库不保存二进制文件；浏览器使用 15 分钟有效的 MinIO 签名 PUT 地址直传。只有 `upload_status=ready` 的记录会进入城市详情和统计。
+照片与 Vlog 的媒体元数据，包括原文件与缩略图对象键、原始文件名、MIME 类型、尺寸、视频时长、私有可见性、EXIF 状态、安全扫描状态和异步处理生命周期。数据库不保存二进制文件；浏览器使用 15 分钟有效的 MinIO 签名 PUT 地址直传，读取原文件和预览图时也只返回短时签名 GET 地址。只有 `upload_status=ready` 的记录会进入城市详情和统计。
 
-`client_request_id` 唯一约束防止重复创建上传任务。`pending` 会预留配额，过期任务不再占用配额；格式、大小或内容校验失败后记录为 `failed`。照片在完成接口中应用 EXIF 方向并重新编码，不保留 EXIF 和其他原始元数据。
+`client_request_id` 唯一约束防止重复创建上传任务。`pending` 和 `processing` 会预留配额，过期的 `pending` 任务不再占用配额；格式、大小、内容、安全扫描或衍生图生成失败后记录为 `failed`。照片在完成接口中应用 EXIF 方向并重新编码，不保留 EXIF 和其他原始元数据。
+
+`scan_status` 依次为 `pending`、`scanning`、`clean`，也可能进入 `infected` 或 `error`。`thumbnail_key`、`thumbnail_mime_type`、`thumbnail_width` 和 `thumbnail_height` 描述 WebP 预览；`processing_error` 保存可排查但不含密钥的错误说明，`processed_at` 记录处理完成时间。恶意文件会从 MinIO 删除并标记 `MEDIA_MALWARE_DETECTED`。
+
+过期清理只锁定并删除 `upload_status=pending` 且 `upload_expires_at` 已过期的行，避免与上传完成接口竞争。`processing`、`ready` 和 `failed` 不会被定时清理；其中失败任务可在城市档案中由用户重试或删除。
+
+### media_mutations
+
+媒体删除的幂等操作记录。保存用户、城市、目标记忆、目标媒体、操作类型、请求指纹和响应快照。`user_id + client_request_id` 唯一约束保证网络重试不会重复执行删除；记录不对目标媒体建立外键，因此原文件、缩略图和 `media_assets` 行删除后仍能识别同一次确认请求。
+
+不要直接在 Navicat 中删除 `media_assets` 行：这样会遗留 MinIO 对象并绕过二次确认和幂等记录。应通过媒体删除预览/确认接口操作。
 
 ## 后续表计划
 
