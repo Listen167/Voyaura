@@ -4,7 +4,7 @@ Voyaura is a map-first travel companion for planning journeys, lighting up
 visited cities, preserving photos and vlogs, and turning memories into visual
 stories with Xiaoxi.
 
-![1794376848603](image\README\1794376848603.png)
+![](image\README\1794376848603.png)
 
 ## Projects
 
