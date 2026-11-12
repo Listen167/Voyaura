@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import lru_cache
+from typing import Never
 
 from minio import Minio
 from minio.error import S3Error
@@ -57,6 +58,29 @@ class MediaStorage:
             return self.client.presigned_get_object(self.bucket, storage_key, expires=expires)
         except (S3Error, OSError, ValueError) as exc:
             self._unavailable("presign_get", exc)
+
+    def presigned_download(
+        self,
+        storage_key: str,
+        expires: timedelta,
+        *,
+        filename: str,
+    ) -> str:
+        self.ensure_bucket()
+        safe_filename = "".join(
+            character for character in filename if character.isalnum() or character in {"-", "_", "."}
+        ) or "voyaura-image.webp"
+        try:
+            return self.client.presigned_get_object(
+                self.bucket,
+                storage_key,
+                expires=expires,
+                response_headers={
+                    "response-content-disposition": f'attachment; filename="{safe_filename}"',
+                },
+            )
+        except (S3Error, OSError, ValueError) as exc:
+            self._unavailable("presign_download", exc)
 
     def stat(self, storage_key: str) -> StoredObject:
         try:
@@ -187,7 +211,7 @@ class MediaStorage:
             self._unavailable("remove_object", exc)
 
     @staticmethod
-    def _unavailable(operation: str, exc: Exception) -> None:
+    def _unavailable(operation: str, exc: Exception) -> Never:
         raise AppError(
             "MEDIA_STORAGE_UNAVAILABLE",
             "对象存储暂时不可用，请稍后重试。",

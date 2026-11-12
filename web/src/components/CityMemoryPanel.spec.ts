@@ -148,6 +148,10 @@ describe('CityMemoryPanel', () => {
     expect(wrapper.text()).toContain('安全扫描已完成')
     await wrapper.get('button[aria-label="删除 riverside.jpg"]').trigger('click')
     expect(wrapper.emitted('deleteMedia')?.[0]).toEqual(['memory-with-photo', memory.media[0]])
+    await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    expect(wrapper.text()).toContain('1 段影像')
+    await wrapper.get('button[aria-label="创作 riverside.jpg"]').trigger('click')
+    expect(wrapper.emitted('stylePhoto')?.[0]).toEqual([memory, memory.media[0]])
   })
 
   it('shows failed media tasks and emits retry or delete commands', async () => {

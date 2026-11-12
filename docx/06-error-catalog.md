@@ -52,6 +52,11 @@
 | `AMAP_OUTSIDE_CHINA` | `20011` | 坐标超出高德境内服务范围 |
 | `AMAP_PROXY_CONFIG_ERROR` | - | 安装 `httpx[socks]` 或修正系统代理配置 |
 | `AMAP_NETWORK_ERROR` | - | 检查代理、DNS、证书与网络连接 |
+| `AMAP_POI_NOT_FOUND` | - | 地点 ID 已失效或高德没有返回详情，重新搜索该地点 |
+| `AMAP_POI_INVALID` | - | 高德地点缺少 ID、名称或合法坐标；记录请求编号并稍后重试 |
+| `AMAP_ROUTE_NOT_FOUND` | - | 高德没有返回对应方式的路线；检查端点、城市和交通方式 |
+| `ROUTE_TRANSIT_ADCODE_REQUIRED` | - | 公交地铁查询缺少起终点城市代码；同时提交两个 `adcode` |
+| `INTERCITY_PROVIDER_NOT_CONFIGURED` | - | 铁路或航班 Provider 尚未授权配置；查看 `10-route-provider-strategy.md` |
 
 ## 通用错误
 
@@ -121,10 +126,44 @@ cd api
 .\.venv\Scripts\python.exe -m app.media_cleanup --limit 100
 ```
 
+## 图片风格生成与 ComfyUI
+
+| 错误代码 | 含义 | 处理方式 |
+|---|---|---|
+| `IMAGE_PROVIDER_NOT_CONFIGURED` | 图片 Provider 被禁用或 ComfyUI 配置不完整 | 按 `07-comfyui-integration.md` 配置 Provider、workflow 路径和节点 ID |
+| `IMAGE_PROVIDER_UNSUPPORTED` | `VOYAURA_IMAGE_PROVIDER` 不是受支持值 | 当前使用 `disabled` 或 `comfyui` |
+| `IMAGE_STYLE_NOT_FOUND` | 请求了不存在的风格 ID | 重新读取 `GET /api/v1/image-styles` |
+| `IMAGE_SOURCE_NOT_FOUND` | 源照片不存在或不属于当前用户 | 刷新城市影像页并重新选择照片 |
+| `IMAGE_SOURCE_NOT_READY` | 源文件不是已完成安全处理的照片 | 等待媒体任务完成；Vlog 暂不进入图片风格生成 |
+| `IMAGE_JOB_IDEMPOTENCY_CONFLICT` | 同一请求编号用于不同照片、风格或 Prompt | 为新的创作生成新的 `client_request_id` |
+| `IMAGE_JOB_NOT_FOUND` | 生成任务不存在、已删除或不属于当前用户 | 刷新视觉工作台，不要继续使用过期任务 ID |
+| `IMAGE_JOB_DELETE_RUNNING_CONFLICT` | 任务正在由图片 worker 生成，暂不能删除 | 等待任务成功或失败后再删除；工作台会自动刷新状态 |
+| `IMAGE_JOB_MUTATION_IDEMPOTENCY_CONFLICT` | 删除请求编号已用于另一任务或操作 | 为新的删除操作生成新的 `client_request_id` |
+| `IMAGE_QUEUE_UNAVAILABLE` | 无法连接图片 Redis 队列 | 检查 Redis 和 `VOYAURA_IMAGE_QUEUE_KEY` |
+| `COMFYUI_WORKFLOW_INVALID` | workflow JSON 无法读取或不是 API format | 在 ComfyUI 使用 Save (API Format) 重新导出 |
+| `COMFYUI_WORKFLOW_NODE_MISSING` | 配置的节点 ID 不存在或没有目标输入 | 检查 LoadImage、正/负 Prompt 和输出节点 ID |
+| `COMFYUI_UNAVAILABLE` | ComfyUI 网络、上传、提交或下载失败 | 确认 `8188` 可访问并查看 ComfyUI 控制台 |
+| `COMFYUI_GENERATION_FAILED` | workflow 节点执行失败 | 在 ComfyUI 中使用相同 workflow 检查模型和节点错误 |
+| `COMFYUI_TIMEOUT` | 等待 `/history/{prompt_id}` 超时 | 调大超时或检查显存、队列和模型加载状态 |
+| `COMFYUI_OUTPUT_MISSING` | workflow 完成但没有图片输出 | 配置 SaveImage/PreviewImage 输出节点 |
+| `IMAGE_PROVIDER_OUTPUT_INVALID` | Provider 返回的内容不是可解码图片 | 检查输出节点和自定义节点返回格式 |
+| `IMAGE_CAPTION_INVALID` | 旅行印记缺少标题、地点或日期 | 刷新城市记忆后重新创建任务，不要手工拼接缺失字段 |
+| `IMAGE_CAPTION_STYLE_INVALID` | 旅行印记使用了不支持的版式、颜色或字体组合 | 重新读取前端选项；可用版式为档案横带、明信片角标和竖排印章 |
+| `IMAGE_CAPTION_FONT_UNAVAILABLE` | worker 找不到中文字体或配置路径不存在 | 在 `api/.env` 配置 `VOYAURA_IMAGE_CAPTION_FONT_PATH` 并重启图片 worker |
+| `IMAGE_CAPTION_RENDER_FAILED` | Pillow 无法把旅行印记写入生成图 | 检查字体文件、Provider 输出图片和图片 worker 日志 |
+| `XIAOXI_ASSET_NOT_CONFIGURED` | 未配置授权素材、文件不存在或版本号缺失 | 按 `09-xiaoxi-photo-assets.md` 配置透明 PNG 和素材版本 |
+| `XIAOXI_ASSET_ALPHA_REQUIRED` | 小曦素材没有实际透明区域 | 导出带透明背景的 RGBA PNG，不要使用白底图片 |
+| `XIAOXI_COMPOSITION_INVALID` | 站位或尺寸不在支持范围 | 重新读取风格能力并选择左右站位和小/中/大尺寸 |
+| `XIAOXI_COMPOSITION_FAILED` | worker 无法读取素材或完成合成 | 检查 PNG 完整性、路径权限和图片 worker 日志 |
+| `IMAGE_GENERATION_ERROR` | 图片 worker 出现未识别异常 | 使用任务 ID 检索图片 worker 日志 |
+
+生成记录删除分为只读预览与确认两步。确认会删除私有生成图和任务行，但保留原始旅行照片；相同 `client_request_id` 重试返回 `existing`，不会重复删除。下载地址是短期 MinIO 签名 URL，过期后刷新视觉工作台即可获取新地址。
+
 ## 本地基础设施
 
 | 现象 | 原因 | 处理方式 |
 |---|---|---|
+| VS Code 在 `media_cleanup.py`、`media_jobs.py` 或 `tests/test_api.py` 标红 `app.*`、SQLAlchemy、pytest 等导入 | 工作区选中了 Conda，而项目依赖安装在 `api/.venv` | 重新加载 VS Code 窗口；确认解释器为 `voyaura/api/.venv/Scripts/python.exe` |
 | `couldn't find env file: voyaura/.env` | 项目根目录缺少 Docker Compose 环境文件 | 在 `voyaura/` 执行 `Copy-Item .env.example .env` |
 | 拉取镜像返回 `EOF`，地址包含 `docker.mirrors.ustc.edu.cn` | Docker Hub 全局镜像站不可用，并非 Compose 或 `.env` 参数错误 | 使用项目 `.env` 中的 `REDIS_IMAGE` 与 `MINIO_IMAGE`；无需修改全局 Docker 设置 |
 | Redis 显示 `Interrupted` | Compose 中另一个镜像拉取失败后，Redis 拉取被连带中断 | 修正失败镜像后重新执行 `docker compose --env-file .env -f infra/compose.yml up -d` |
@@ -144,4 +183,4 @@ cd api
 
 ## 当前已知阻塞
 
-截至 2026-11-11，本机高德 JS API、行政区图层和 Loca 2.0 已加载成功；Web 服务 Key 返回 `10007 / INVALID_USER_SIGNATURE`。在高德控制台关闭该 Key 的“数字签名”，或把对应私钥写入 `api/.env` 后，重启 API 再验证点亮流程。该错误当前会携带 CORS、`X-Request-ID`、高德 `infocode` 和可重试标记，方便前后端联合排查。
+截至 2026-11-12，本机高德 JS API、行政区图层和 Loca 2.0 已加载成功；点亮、POI 与路线 Web 服务请求仍返回 `10007 / INVALID_USER_SIGNATURE`。在高德控制台关闭该 Key 的“数字签名”，或把对应私钥写入 `api/.env` 后，重启 API 再验证点亮、地点搜索与路线规划。该错误当前会携带 CORS、`X-Request-ID`、高德 `infocode` 和可重试标记，前端会显示对应请求编号。

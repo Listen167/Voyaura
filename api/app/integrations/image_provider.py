@@ -116,6 +116,19 @@ class ComfyUIImageProvider:
                     }
         return None
 
+    @staticmethod
+    def _model_names(workflow: dict[str, Any]) -> list[str]:
+        names: list[str] = []
+        for node in workflow.values():
+            inputs = node.get("inputs") if isinstance(node, dict) else None
+            if not isinstance(inputs, dict):
+                continue
+            for key in ("ckpt_name", "unet_name", "model_name"):
+                value = inputs.get(key)
+                if isinstance(value, str) and value.strip() and value not in names:
+                    names.append(value)
+        return names
+
     def generate(
         self,
         source_path: str,
@@ -124,6 +137,7 @@ class ComfyUIImageProvider:
         negative_prompt: str | None,
     ) -> GeneratedImage:
         workflow = copy.deepcopy(self._workflow())
+        model_names = self._model_names(workflow)
         client_id = f"voyaura-{uuid.uuid4()}"
         try:
             with httpx.Client(base_url=self.base_url, timeout=30) as client:
@@ -173,6 +187,15 @@ class ComfyUIImageProvider:
                                 "ComfyUI workflow 执行失败，请检查节点日志。",
                                 status_code=422,
                             )
+                        if isinstance(status, dict) and (
+                            status.get("completed") is True
+                            or status.get("status_str") == "success"
+                        ):
+                            raise AppError(
+                                "COMFYUI_OUTPUT_MISSING",
+                                "ComfyUI 已完成任务，但没有返回图片输出。",
+                                status_code=422,
+                            )
                     time.sleep(settings.comfyui_poll_interval_seconds)
                 if history_entry is None:
                     raise AppError(
@@ -194,7 +217,7 @@ class ComfyUIImageProvider:
                     data=output.content,
                     mime_type=output.headers.get("content-type", "application/octet-stream").split(";", 1)[0],
                     provider_job_id=provider_job_id,
-                    metadata={"output": descriptor},
+                    metadata={"output": descriptor, "model_names": model_names},
                 )
         except AppError:
             raise

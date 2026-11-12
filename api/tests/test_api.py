@@ -6,21 +6,46 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageDraw
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.errors import AppError
-from app.integrations.amap import ResolvedCity, get_amap_client
+from app.image_jobs import process_image_job, render_travel_stamp, resolve_caption_font
+from app.integrations.amap import (
+    AMapClient,
+    AMapPoi,
+    AMapRouteOption,
+    AMapRouteStep,
+    ResolvedCity,
+    get_amap_client,
+)
+from app.integrations.image_provider import (
+    ComfyUIImageProvider,
+    GeneratedImage,
+    ImageProviderInfo,
+    get_image_provider_info,
+)
+from app.integrations.image_queue import get_image_queue
 from app.integrations.media_queue import get_media_queue
 from app.integrations.media_scanner import ScanResult
 from app.integrations.media_storage import StoredObject, get_media_storage
 from app.main import app
 from app.media_cleanup import cleanup_expired_media_uploads
 from app.media_jobs import process_media_asset
-from app.models import City, CityMemory, MediaAsset, MediaMutation, MemoryMutation, User
+from app.models import (
+    City,
+    CityMemory,
+    CityVisit,
+    ImageGenerationJob,
+    MediaAsset,
+    MediaMutation,
+    MemoryMutation,
+    User,
+)
+from app.xiaoxi_photo import compose_xiaoxi_photo
 
 engine = create_engine(
     "sqlite://",
@@ -42,6 +67,8 @@ app.dependency_overrides[get_db] = override_get_db
 
 
 class FakeAMapClient:
+    key = "test-amap-web-key"
+
     def resolve_wgs84_city(self, longitude: float, latitude: float) -> ResolvedCity:
         return ResolvedCity(
             adcode="440100",
@@ -53,6 +80,88 @@ class FakeAMapClient:
             gcj_longitude=longitude + 0.004,
             gcj_latitude=latitude - 0.002,
         )
+
+    @staticmethod
+    def museum() -> AMapPoi:
+        return AMapPoi(
+            id="B0TESTMUSEUM",
+            name="广东省博物馆",
+            category="科教文化服务;博物馆",
+            typecode="140100",
+            address="珠江东路2号",
+            province="广东省",
+            city="广州市",
+            district="天河区",
+            adcode="440106",
+            longitude=113.3245,
+            latitude=23.1178,
+            telephone="020-38046886",
+            rating="4.8",
+            average_cost=None,
+            opening_hours="09:00-17:00",
+        )
+
+    def search_pois(
+        self,
+        *,
+        keywords: str,
+        adcode: str,
+        category: str = "",
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[list[AMapPoi], int]:
+        assert keywords == "博物馆"
+        assert adcode == "440100"
+        assert category == ""
+        assert page == 1
+        assert page_size == 10
+        return [self.museum()], 1
+
+    def get_poi_detail(self, poi_id: str) -> AMapPoi:
+        assert poi_id == "B0TESTMUSEUM"
+        return self.museum()
+
+    def plan_route(
+        self,
+        *,
+        mode: str,
+        origin: tuple[float, float],
+        destination: tuple[float, float],
+        origin_adcode: str | None = None,
+        destination_adcode: str | None = None,
+    ) -> tuple[list[AMapRouteOption], float | None]:
+        assert mode == "transit"
+        assert origin == (113.2644, 23.1291)
+        assert destination == (113.3245, 23.1178)
+        assert origin_adcode == "440100"
+        assert destination_adcode == "440100"
+        return [
+            AMapRouteOption(
+                distance_meters=8200,
+                duration_seconds=2700,
+                walking_distance_meters=620,
+                tolls_yuan=None,
+                taxi_cost_yuan=28.0,
+                steps=(
+                    AMapRouteStep(
+                        instruction="步行至公园前站",
+                        distance_meters=320,
+                        duration_seconds=300,
+                        transport="walk",
+                    ),
+                    AMapRouteStep(
+                        instruction="乘坐地铁1号线，从公园前到体育西路",
+                        distance_meters=7600,
+                        duration_seconds=2100,
+                        transport="transit",
+                    ),
+                ),
+            )
+        ], 28.0
+
+    @staticmethod
+    def poi_navigation_url(poi: AMapPoi) -> str:
+        return AMapClient.poi_navigation_url(poi)
 
 
 fake_amap_client = FakeAMapClient()
@@ -70,6 +179,18 @@ class FakeMediaStorage:
 
     def presigned_get(self, storage_key: str, expires: timedelta) -> str:
         return f"http://storage.test/{storage_key}?expires={int(expires.total_seconds())}"
+
+    def presigned_download(
+        self,
+        storage_key: str,
+        expires: timedelta,
+        *,
+        filename: str,
+    ) -> str:
+        return (
+            f"http://storage.test/{storage_key}?download={filename}"
+            f"&expires={int(expires.total_seconds())}"
+        )
 
     def stat(self, storage_key: str) -> StoredObject:
         if storage_key not in self.objects:
@@ -129,6 +250,39 @@ fake_media_queue = FakeMediaJobQueue()
 app.dependency_overrides[get_media_queue] = lambda: fake_media_queue
 
 
+fake_image_queue = FakeMediaJobQueue()
+app.dependency_overrides[get_image_queue] = lambda: fake_image_queue
+
+
+class FakeImageProvider:
+    name = "fake"
+
+    def generate(
+        self,
+        source_path: str,
+        *,
+        prompt: str,
+        negative_prompt: str | None,
+    ) -> GeneratedImage:
+        assert Path(source_path).is_file()
+        assert "retro travel film photography" in prompt
+        assert "medium preservation" in prompt
+        assert negative_prompt is not None
+        assert negative_prompt.startswith("blurry")
+        assert "plastic skin" in negative_prompt
+        output = BytesIO()
+        Image.new("RGB", (24, 18), (42, 88, 73)).save(output, format="PNG")
+        return GeneratedImage(
+            data=output.getvalue(),
+            mime_type="image/png",
+            provider_job_id="comfy-test-job",
+            metadata={
+                "output": {"filename": "test.png"},
+                "model_names": ["voyaura-test-model.safetensors"],
+            },
+        )
+
+
 @pytest.fixture(autouse=True)
 def reset_database() -> Generator[None, None, None]:
     Base.metadata.drop_all(engine)
@@ -145,6 +299,7 @@ def reset_database() -> Generator[None, None, None]:
     fake_media_storage.objects.clear()
     fake_media_storage.last_key = None
     fake_media_queue.jobs.clear()
+    fake_image_queue.jobs.clear()
     yield
 
 
@@ -187,6 +342,7 @@ def test_empty_map_overview_does_not_invent_visits() -> None:
     assert response.status_code == 200
     assert response.json()["stats"]["lit_cities"] == 0
     assert response.json()["visited_cities"] == []
+    assert response.json()["year_summaries"] == []
 
 
 def test_check_in_preview_does_not_write_a_visit() -> None:
@@ -245,6 +401,106 @@ def test_manual_check_in_preview_does_not_write_and_confirm_is_idempotent() -> N
     assert overview.json()["visited_cities"][0]["adcode"] == "110000"
 
 
+def test_poi_search_and_detail_return_source_freshness_and_navigation() -> None:
+    search = client.post(
+        "/api/v1/tools/poi/search",
+        json={"keywords": "博物馆", "city_adcode": "440100"},
+    )
+    detail = client.get("/api/v1/tools/poi/B0TESTMUSEUM")
+
+    assert search.status_code == 200
+    assert search.json()["provider"] == "amap"
+    assert search.json()["total"] == 1
+    assert search.json()["queried_at"]
+    item = search.json()["items"][0]
+    assert item["name"] == "广东省博物馆"
+    assert item["coordinate_system"] == "GCJ02"
+    assert item["navigation_url"].startswith("https://uri.amap.com/marker?")
+    assert "coordinate=gaode" in item["navigation_url"]
+    assert detail.status_code == 200
+    assert detail.json()["item"]["opening_hours"] == "09:00-17:00"
+    assert detail.json()["provider"] == "amap"
+
+
+def test_route_capabilities_separate_local_and_licensed_intercity_sources() -> None:
+    response = client.get("/api/v1/tools/routes/capabilities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["queried_at"]
+    assert [item["mode"] for item in payload["local"]] == [
+        "walking",
+        "transit",
+        "driving",
+    ]
+    assert all(item["provider"] == "amap" for item in payload["local"])
+    assert all(item["available"] for item in payload["local"])
+    intercity = {item["mode"]: item for item in payload["intercity"]}
+    assert intercity["high_speed_rail"]["state"] == "partner_required"
+    assert intercity["flight"]["available"] is False
+    assert "fare" in intercity["flight"]["data_scope"]
+
+
+def test_local_route_returns_source_freshness_gcj02_and_steps() -> None:
+    response = client.post(
+        "/api/v1/tools/routes/plan",
+        json={
+            "mode": "transit",
+            "origin": {"longitude": 113.2644, "latitude": 23.1291},
+            "destination": {"longitude": 113.3245, "latitude": 23.1178},
+            "origin_adcode": "440100",
+            "destination_adcode": "440100",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "amap"
+    assert payload["coordinate_system"] == "GCJ02"
+    assert payload["queried_at"]
+    assert payload["options"][0]["duration_seconds"] == 2700
+    assert payload["options"][0]["walking_distance_meters"] == 620
+    assert payload["options"][0]["steps"][1]["transport"] == "transit"
+
+
+def test_amap_transit_parser_flattens_walk_bus_and_rail_segments() -> None:
+    option = AMapClient._route_option_from_payload(
+        {
+            "distance": "12000",
+            "duration": "3600",
+            "walking_distance": "500",
+            "segments": [
+                {
+                    "walking": {
+                        "steps": [{"instruction": "步行至车站", "distance": "500"}]
+                    },
+                    "bus": {
+                        "buslines": [
+                            {
+                                "name": "地铁1号线(西朗-广州东站)",
+                                "distance": "7000",
+                                "duration": "1800",
+                                "departure_stop": {"name": "公园前"},
+                                "arrival_stop": {"name": "广州东站"},
+                            }
+                        ]
+                    },
+                },
+                {"railway": {"name": "C1234", "distance": "4500", "time": "1300"}},
+            ],
+        },
+        mode="transit",
+        route={"taxi_cost": "36"},
+    )
+
+    assert option.distance_meters == 12000
+    assert option.duration_seconds == 3600
+    assert option.walking_distance_meters == 500
+    assert option.taxi_cost_yuan == 36
+    assert [step.transport for step in option.steps] == ["walk", "transit", "railway"]
+    assert option.steps[1].instruction == "乘坐地铁1号线，从公园前到广州东站"
+
+
 def test_city_memory_detail_is_empty_after_first_check_in() -> None:
     client.post(
         "/api/v1/check-ins/confirm",
@@ -276,11 +532,21 @@ def test_city_memory_detail_and_map_stats_use_real_records() -> None:
         user = db.scalar(select(User).where(User.username == "AuroraRovella"))
         city = db.scalar(select(City).where(City.adcode == "440100"))
         assert user is not None and city is not None
+        visit = db.scalar(
+            select(CityVisit).where(
+                CityVisit.user_id == user.id,
+                CityVisit.city_id == city.id,
+            )
+        )
+        assert visit is not None
+        visit.first_visited_at = datetime(2024, 5, 1, tzinfo=UTC)
+        visit.last_visited_at = datetime(2026, 5, 1, tzinfo=UTC)
         memory = CityMemory(
             user_id=user.id,
             city_id=city.id,
             title="珠江边的晚风",
             body="真实测试记录。",
+            occurred_at=datetime(2025, 6, 8, tzinfo=UTC),
         )
         memory.media_assets.extend(
             [
@@ -320,6 +586,23 @@ def test_city_memory_detail_and_map_stats_use_real_records() -> None:
     assert overview.json()["stats"]["photos"] == 1
     assert overview.json()["stats"]["vlog_minutes"] == 2
     assert overview.json()["visited_cities"][0]["memory_count"] == 1
+    assert overview.json()["year_summaries"] == [
+        {
+            "year": 2026,
+            "stats": {"lit_cities": 1, "memories": 0, "photos": 0, "vlog_minutes": 0},
+            "cities": [{"adcode": "440100", "memory_count": 0}],
+        },
+        {
+            "year": 2025,
+            "stats": {"lit_cities": 1, "memories": 1, "photos": 1, "vlog_minutes": 2},
+            "cities": [{"adcode": "440100", "memory_count": 1}],
+        },
+        {
+            "year": 2024,
+            "stats": {"lit_cities": 1, "memories": 0, "photos": 0, "vlog_minutes": 0},
+            "cities": [{"adcode": "440100", "memory_count": 0}],
+        },
+    ]
 
 
 def test_city_memory_preview_does_not_write_and_confirm_is_idempotent() -> None:
@@ -857,6 +1140,468 @@ def test_cleanup_removes_only_expired_pending_uploads() -> None:
     with TestingSession() as db:
         assert db.get(MediaAsset, expired_id) is None
         assert db.get(MediaAsset, active_id) is not None
+
+
+def create_ready_photo_for_generation() -> tuple[str, str]:
+    memory_id = create_memory_for_media()
+    asset_id = uuid.uuid4()
+    storage_key = f"tests/guangzhou/{asset_id}-style-source.jpg"
+    source = BytesIO()
+    Image.new("RGB", (32, 24), (120, 80, 60)).save(source, format="JPEG")
+    fake_media_storage.objects[storage_key] = (source.getvalue(), "image/jpeg")
+    with TestingSession.begin() as db:
+        db.add(
+            MediaAsset(
+                id=asset_id,
+                memory_id=uuid.UUID(memory_id),
+                client_request_id=uuid.uuid4(),
+                kind="photo",
+                storage_key=storage_key,
+                original_filename="style-source.jpg",
+                mime_type="image/jpeg",
+                byte_size=len(source.getvalue()),
+                width=32,
+                height=24,
+                visibility="private",
+                upload_status="ready",
+                exif_status="removed",
+                scan_status="clean",
+            )
+        )
+    return memory_id, str(asset_id)
+
+
+def test_image_job_preview_is_read_only_and_reports_missing_provider() -> None:
+    _, asset_id = create_ready_photo_for_generation()
+    catalog = client.get("/api/v1/image-styles")
+    response = client.post(
+        "/api/v1/image-jobs/preview",
+        json={
+            "username": "AuroraRovella",
+            "source_asset_id": asset_id,
+            "style_id": "retro_film",
+            "prompt": "珠江夜景",
+            "negative_prompt": "blurry",
+        },
+    )
+    create = client.post(
+        "/api/v1/image-jobs",
+        json={
+            "username": "AuroraRovella",
+            "client_request_id": str(uuid.uuid4()),
+            "source_asset_id": asset_id,
+            "style_id": "retro_film",
+            "prompt": "珠江夜景",
+            "negative_prompt": "blurry",
+        },
+    )
+    zine_preview = client.post(
+        "/api/v1/image-jobs/preview",
+        json={
+            "username": "AuroraRovella",
+            "source_asset_id": asset_id,
+            "style_id": "minimal_zine_poster",
+            "prompt": "珠江边没有寄出的明信片",
+            "negative_prompt": None,
+            "preservation_level": "high",
+            "caption_mode": "travel_stamp",
+            "caption_layout": "vertical_stamp",
+            "caption_palette": "forest",
+            "caption_font_style": "serif",
+        },
+    )
+
+    assert response.status_code == 200
+    assert catalog.status_code == 200
+    minimal_zine = next(
+        style for style in catalog.json()["styles"] if style["id"] == "minimal_zine_poster"
+    )
+    assert minimal_zine["recipe"]["version"] == "minimal-zine-v0.3.1"
+    assert minimal_zine["source"] == {
+        "name": "GC Minimal Zine Poster",
+        "version": "0.3.1",
+        "url": "https://github.com/LiamGvchi/gc-minimal-zine-poster",
+        "license": "MIT",
+    }
+    assert catalog.json()["companion"]["available"] is False
+    assert "XIAOXI_PHOTO_ASSET_PATH" in catalog.json()["companion"]["missing_settings"]
+    assert response.json()["provider_available"] is False
+    assert "retro travel film photography" in response.json()["effective_prompt"]
+    assert response.json()["preservation_level"] == "balanced"
+    assert response.json()["recipe"]["preservation_level"] == "balanced"
+    assert "plastic skin" in response.json()["negative_prompt"]
+    assert zine_preview.status_code == 200
+    assert zine_preview.json()["recipe"]["version"] == "minimal-zine-v0.3.1"
+    assert zine_preview.json()["recipe"]["preservation_level"] == "high"
+    assert "high preservation" in zine_preview.json()["effective_prompt"]
+    assert "commercial headline" in zine_preview.json()["negative_prompt"]
+    assert zine_preview.json()["caption_mode"] == "travel_stamp"
+    assert zine_preview.json()["caption"] == {
+        "title": "带媒体的记忆",
+        "location": "广州市",
+        "date": "2026-11-10",
+        "layout": "vertical_stamp",
+        "palette": "forest",
+        "font_style": "serif",
+    }
+    assert zine_preview.json()["companion"] is None
+    assert create.status_code == 503
+    assert create.json()["error"]["code"] == "IMAGE_PROVIDER_NOT_CONFIGURED"
+    with TestingSession() as db:
+        assert db.scalar(select(func.count()).select_from(ImageGenerationJob)) == 0
+
+
+def test_image_job_is_idempotent_and_worker_stores_private_output() -> None:
+    memory_id, asset_id = create_ready_photo_for_generation()
+    app.dependency_overrides[get_image_provider_info] = lambda: ImageProviderInfo(
+        provider="comfyui",
+        available=True,
+        missing_settings=(),
+    )
+    payload = {
+        "username": "AuroraRovella",
+        "client_request_id": str(uuid.uuid4()),
+        "source_asset_id": asset_id,
+        "style_id": "retro_film",
+        "prompt": "珠江夜景",
+        "negative_prompt": "blurry",
+    }
+    try:
+        created = client.post("/api/v1/image-jobs", json=payload)
+        existing = client.post("/api/v1/image-jobs", json=payload)
+        conflict = client.post(
+            "/api/v1/image-jobs",
+            json={**payload, "preservation_level": "high"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_image_provider_info, None)
+
+    assert created.status_code == 200
+    assert created.json()["status"] == "created"
+    assert existing.json()["status"] == "existing"
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "IMAGE_JOB_IDEMPOTENCY_CONFLICT"
+    job_id = created.json()["job"]["id"]
+    assert fake_image_queue.jobs == [job_id]
+
+    result = process_image_job(
+        job_id,
+        storage=fake_media_storage,  # type: ignore[arg-type]
+        provider=FakeImageProvider(),
+        session_factory=TestingSession,
+    )
+    status = client.get(f"/api/v1/image-jobs/{job_id}")
+
+    assert result == "succeeded"
+    assert status.status_code == 200
+    assert status.json()["status"] == "succeeded"
+    assert status.json()["provider_job_id"] == "comfy-test-job"
+    assert status.json()["preservation_level"] == "balanced"
+    assert status.json()["recipe"]["version"] == "voyaura-1"
+    assert status.json()["model_names"] == ["voyaura-test-model.safetensors"]
+    assert status.json()["caption_mode"] == "none"
+    assert status.json()["caption"] is None
+    assert status.json()["output_url"].startswith("http://storage.test/")
+    assert status.json()["download_url"].startswith("http://storage.test/")
+    assert "download=voyaura-440100-retro_film" in status.json()["download_url"]
+    assert status.json()["source_filename"] == "style-source.jpg"
+    assert status.json()["city_name"] == "广州市"
+    assert status.json()["memory_title"] == "带媒体的记忆"
+    with TestingSession() as db:
+        job = db.get(ImageGenerationJob, uuid.UUID(job_id))
+        assert job is not None
+        assert job.output_storage_key in fake_media_storage.objects
+        output_key = job.output_storage_key
+        data, content_type = fake_media_storage.objects[job.output_storage_key]
+        assert content_type == "image/webp"
+        with Image.open(BytesIO(data)) as generated:
+            assert generated.size == (24, 18)
+
+    delete_payload = {
+        "username": "AuroraRovella",
+        "client_request_id": str(uuid.uuid4()),
+    }
+    deleted = client.post(
+        f"/api/v1/cities/440100/memories/{memory_id}/media/{asset_id}/delete-confirm",
+        json=delete_payload,
+    )
+    assert deleted.status_code == 200
+    assert output_key not in fake_media_storage.objects
+    with TestingSession() as db:
+        assert db.get(ImageGenerationJob, uuid.UUID(job_id)) is None
+
+
+def test_xiaoxi_photo_job_requires_an_authorized_asset() -> None:
+    _, asset_id = create_ready_photo_for_generation()
+    app.dependency_overrides[get_image_provider_info] = lambda: ImageProviderInfo(
+        provider="comfyui",
+        available=True,
+        missing_settings=(),
+    )
+    try:
+        preview = client.post(
+            "/api/v1/image-jobs/preview",
+            json={
+                "username": "AuroraRovella",
+                "source_asset_id": asset_id,
+                "style_id": "retro_film",
+                "prompt": "",
+                "negative_prompt": None,
+                "companion_enabled": True,
+                "companion_position": "right",
+                "companion_scale": "medium",
+            },
+        )
+        create = client.post(
+            "/api/v1/image-jobs",
+            json={
+                "username": "AuroraRovella",
+                "client_request_id": str(uuid.uuid4()),
+                "source_asset_id": asset_id,
+                "style_id": "retro_film",
+                "prompt": "",
+                "negative_prompt": None,
+                "companion_enabled": True,
+                "companion_position": "right",
+                "companion_scale": "medium",
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_image_provider_info, None)
+
+    assert preview.status_code == 200
+    assert preview.json()["companion_available"] is False
+    assert preview.json()["companion"]["position"] == "right"
+    assert create.status_code == 503
+    assert create.json()["error"]["code"] == "XIAOXI_ASSET_NOT_CONFIGURED"
+
+
+def test_comfyui_model_names_are_extracted_without_duplicates() -> None:
+    workflow = {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "flux.safetensors"}},
+        "2": {"class_type": "UNETLoader", "inputs": {"unet_name": "flux.safetensors"}},
+        "3": {"class_type": "Other", "inputs": {"model_name": "travel-lora.safetensors"}},
+    }
+
+    assert ComfyUIImageProvider._model_names(workflow) == [
+        "flux.safetensors",
+        "travel-lora.safetensors",
+    ]
+
+
+def test_travel_stamp_is_rendered_after_generation() -> None:
+    source = BytesIO()
+    Image.new("RGB", (800, 1000), (42, 88, 73)).save(source, format="WEBP")
+    stamped, width, height = render_travel_stamp(
+        source.getvalue(),
+        {"title": "珠江夜色", "location": "广州市", "date": "2026-11-10"},
+        font_path=resolve_caption_font(),
+    )
+
+    assert (width, height) == (800, 1000)
+    with Image.open(BytesIO(stamped)) as image:
+        assert image.size == (800, 1000)
+        assert image.convert("RGB").getpixel((400, 950)) != (42, 88, 73)
+
+
+@pytest.mark.parametrize(
+    ("layout", "palette", "font_style", "sample_point"),
+    [
+        ("archive_band", "coral", "sans", (400, 950)),
+        ("postcard_corner", "forest", "serif", (760, 950)),
+        ("vertical_stamp", "ink", "serif", (740, 500)),
+    ],
+)
+def test_travel_stamp_supports_layout_palette_and_font_combinations(
+    layout: str,
+    palette: str,
+    font_style: str,
+    sample_point: tuple[int, int],
+) -> None:
+    source = BytesIO()
+    background = (42, 88, 73)
+    Image.new("RGB", (800, 1000), background).save(source, format="WEBP")
+
+    stamped, width, height = render_travel_stamp(
+        source.getvalue(),
+        {
+            "title": "广州漫游",
+            "location": "广州市",
+            "date": "2026-11-10",
+            "layout": layout,
+            "palette": palette,
+            "font_style": font_style,
+        },
+    )
+
+    assert (width, height) == (800, 1000)
+    with Image.open(BytesIO(stamped)) as image:
+        assert image.convert("RGB").getpixel(sample_point) != pytest.approx(background, abs=8)
+
+
+def test_xiaoxi_transparent_asset_composes_at_selected_position(tmp_path: Path) -> None:
+    background = BytesIO()
+    Image.new("RGB", (800, 1000), (120, 150, 135)).save(background, format="WEBP")
+    asset = Image.new("RGBA", (160, 320), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(asset)
+    draw.ellipse((25, 10, 135, 120), fill=(244, 198, 65, 255))
+    draw.rounded_rectangle((35, 100, 125, 315), radius=30, fill=(229, 77, 52, 245))
+    asset_path = tmp_path / "xiaoxi-authorized.png"
+    asset.save(asset_path, format="PNG")
+
+    composed, width, height = compose_xiaoxi_photo(
+        background.getvalue(),
+        {"position": "right", "scale": "medium"},
+        asset_path=str(asset_path),
+    )
+
+    assert (width, height) == (800, 1000)
+    with Image.open(BytesIO(composed)) as image:
+        rgb = image.convert("RGB")
+        assert rgb.getpixel((700, 800)) != (120, 150, 135)
+        assert rgb.getpixel((80, 800)) == pytest.approx((120, 150, 135), abs=8)
+
+
+def test_image_job_history_favorite_and_idempotent_delete() -> None:
+    _, asset_id = create_ready_photo_for_generation()
+    app.dependency_overrides[get_image_provider_info] = lambda: ImageProviderInfo(
+        provider="comfyui",
+        available=True,
+        missing_settings=(),
+    )
+    try:
+        created = client.post(
+            "/api/v1/image-jobs",
+            json={
+                "username": "AuroraRovella",
+                "client_request_id": str(uuid.uuid4()),
+                "source_asset_id": asset_id,
+                "style_id": "retro_film",
+                "prompt": "珠江夜景",
+                "negative_prompt": "blurry",
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_image_provider_info, None)
+    job_id = created.json()["job"]["id"]
+    assert process_image_job(
+        job_id,
+        storage=fake_media_storage,  # type: ignore[arg-type]
+        provider=FakeImageProvider(),
+        session_factory=TestingSession,
+    ) == "succeeded"
+
+    history = client.get("/api/v1/image-jobs")
+    favorite = client.post(
+        f"/api/v1/image-jobs/{job_id}/favorite",
+        json={"username": "AuroraRovella", "favorite": True},
+    )
+    favorites = client.get("/api/v1/image-jobs?favorite_only=true")
+    preview = client.post(
+        f"/api/v1/image-jobs/{job_id}/delete-preview",
+        json={
+            "username": "AuroraRovella",
+            "client_request_id": str(uuid.uuid4()),
+        },
+    )
+
+    assert history.status_code == 200
+    assert [item["id"] for item in history.json()["items"]] == [job_id]
+    assert favorite.status_code == 200
+    assert favorite.json()["is_favorite"] is True
+    assert [item["id"] for item in favorites.json()["items"]] == [job_id]
+    assert preview.status_code == 200
+    assert preview.json()["has_output"] is True
+    with TestingSession() as db:
+        job = db.get(ImageGenerationJob, uuid.UUID(job_id))
+        assert job is not None
+        output_key = job.output_storage_key
+    assert output_key in fake_media_storage.objects
+
+    request_id = str(uuid.uuid4())
+    delete_payload = {"username": "AuroraRovella", "client_request_id": request_id}
+    deleted = client.post(
+        f"/api/v1/image-jobs/{job_id}/delete-confirm",
+        json=delete_payload,
+    )
+    existing = client.post(
+        f"/api/v1/image-jobs/{job_id}/delete-confirm",
+        json=delete_payload,
+    )
+
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "deleted"
+    assert existing.status_code == 200
+    assert existing.json()["status"] == "existing"
+    assert output_key not in fake_media_storage.objects
+    assert client.get(f"/api/v1/image-jobs/{job_id}").status_code == 404
+
+
+def test_image_job_delete_rejects_running_job_and_request_id_conflicts() -> None:
+    _, first_asset_id = create_ready_photo_for_generation()
+    app.dependency_overrides[get_image_provider_info] = lambda: ImageProviderInfo(
+        provider="comfyui",
+        available=True,
+        missing_settings=(),
+    )
+    try:
+        first = client.post(
+            "/api/v1/image-jobs",
+            json={
+                "username": "AuroraRovella",
+                "client_request_id": str(uuid.uuid4()),
+                "source_asset_id": first_asset_id,
+                "style_id": "retro_film",
+                "prompt": "",
+                "negative_prompt": None,
+            },
+        )
+        _, second_asset_id = create_ready_photo_for_generation()
+        second = client.post(
+            "/api/v1/image-jobs",
+            json={
+                "username": "AuroraRovella",
+                "client_request_id": str(uuid.uuid4()),
+                "source_asset_id": second_asset_id,
+                "style_id": "retro_film",
+                "prompt": "",
+                "negative_prompt": None,
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_image_provider_info, None)
+    first_id = first.json()["job"]["id"]
+    second_id = second.json()["job"]["id"]
+    with TestingSession.begin() as db:
+        running = db.get(ImageGenerationJob, uuid.UUID(first_id))
+        assert running is not None
+        running.status = "running"
+
+    request_id = str(uuid.uuid4())
+    running_preview = client.post(
+        f"/api/v1/image-jobs/{first_id}/delete-preview",
+        json={"username": "AuroraRovella", "client_request_id": request_id},
+    )
+    running_delete = client.post(
+        f"/api/v1/image-jobs/{first_id}/delete-confirm",
+        json={"username": "AuroraRovella", "client_request_id": request_id},
+    )
+    assert running_preview.status_code == 409
+    assert running_preview.json()["error"]["code"] == "IMAGE_JOB_DELETE_RUNNING_CONFLICT"
+    assert running_delete.status_code == 409
+
+    second_request_id = str(uuid.uuid4())
+    deleted = client.post(
+        f"/api/v1/image-jobs/{second_id}/delete-confirm",
+        json={"username": "AuroraRovella", "client_request_id": second_request_id},
+    )
+    conflict = client.post(
+        f"/api/v1/image-jobs/{first_id}/delete-confirm",
+        json={"username": "AuroraRovella", "client_request_id": second_request_id},
+    )
+    assert deleted.status_code == 200
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "IMAGE_JOB_MUTATION_IDEMPOTENCY_CONFLICT"
 
 
 def test_unvisited_city_memory_error_is_actionable() -> None:

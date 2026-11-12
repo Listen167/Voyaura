@@ -42,6 +42,38 @@ The worker also removes expired, unfinished upload intents once per hour. Run
 that cleanup manually from `api/` with
 `.\.venv\Scripts\python.exe -m app.media_cleanup --limit 100`.
 
+The city archive includes a date-grouped photo/Vlog gallery. Ready photos can
+open the private style dialog. Image generation is disabled by default; after
+configuring a ComfyUI API-format workflow in `api/.env`, start its separate
+worker from the project root with `.\worker\run-image.ps1`. See
+`docx/07-comfyui-integration.md` for the node mapping and verification flow.
+The Visual Studio view keeps generation history, favorite filters, signed
+downloads, idempotent deletion, and a touch-friendly before/after slider in a
+responsive desktop/mobile workspace. UI reference prompts for Image 2 are in
+`docx/08-ui-image-prompts.md`.
+
+The map overview includes a real-data year timeline. Selecting a year filters
+the city markers and footprint totals together; years are derived only from
+confirmed visit endpoints and memory dates, and ready media contributes to the
+matching memory year.
+
+The `minimal_zine_poster` preset adapts the MIT-licensed GC Minimal Zine
+Poster v0.3.1 prompt system. Voyaura stores its recipe version and source
+preservation level with each image job. See `THIRD_PARTY_NOTICES.md` for the
+required license notice; upstream example images are not included.
+
+Image jobs may optionally add a deterministic travel stamp containing the
+memory title, city, and date. The image worker renders this after provider
+generation so Chinese text remains readable. Hosts without a supported CJK
+font must set `VOYAURA_IMAGE_CAPTION_FONT_PATH`.
+
+Xiaoxi co-photos use an optional authorized transparent PNG and deterministic
+composition after provider generation. Until both
+`VOYAURA_XIAOXI_PHOTO_ASSET_PATH` and
+`VOYAURA_XIAOXI_PHOTO_ASSET_VERSION` are configured, the UI keeps this option
+disabled and the API rejects attempts to create a fake co-photo. See
+`docx/09-xiaoxi-photo-assets.md`.
+
 The Redis image comes from Amazon ECR's official Docker Library mirror. The
 MinIO image comes from Chainguard and is pinned by digest. These project-level
 sources avoid depending on a machine-wide Docker Hub mirror. If startup fails,

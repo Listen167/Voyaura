@@ -6,6 +6,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,10 +14,14 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import SessionLocal
 from app.errors import AppError
-from app.integrations.media_storage import MediaStorage, get_media_storage
+from app.integrations.media_storage import get_media_storage
 from app.models import MediaAsset
 
 SessionFactory = Callable[[], Session]
+
+
+class CleanupStorage(Protocol):
+    def remove(self, storage_key: str) -> None: ...
 
 
 @dataclass
@@ -40,7 +45,7 @@ def aware_utc(value: datetime) -> datetime:
 
 def cleanup_expired_media_uploads(
     *,
-    storage: MediaStorage | None = None,
+    storage: CleanupStorage | None = None,
     session_factory: SessionFactory = SessionLocal,
     now: datetime | None = None,
     limit: int | None = None,

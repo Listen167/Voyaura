@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from typing import Literal
 
 from sqlalchemy import (
     JSON,
@@ -65,7 +66,10 @@ class CityVisit(Base):
     first_visited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_visited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    check_in_source: Mapped[str] = mapped_column(String(20), default="device")
+    check_in_source: Mapped[Literal["device", "ip", "manual"]] = mapped_column(
+        String(20),
+        default="device",
+    )
 
     user: Mapped[User] = relationship(back_populates="city_visits")
     city: Mapped[City] = relationship(back_populates="visits")
@@ -84,7 +88,9 @@ class CityMemory(Base):
     title: Mapped[str] = mapped_column(String(160))
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    visibility: Mapped[str] = mapped_column(String(20), default="private")
+    visibility: Mapped[Literal["private", "shared"]] = mapped_column(
+        String(20), default="private"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -124,7 +130,7 @@ class MediaAsset(Base):
         ForeignKey("city_memories.id", ondelete="CASCADE"),
         index=True,
     )
-    kind: Mapped[str] = mapped_column(String(20))
+    kind: Mapped[Literal["photo", "vlog"]] = mapped_column(String(20))
     client_request_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     storage_key: Mapped[str] = mapped_column(String(512), unique=True)
     thumbnail_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -134,10 +140,16 @@ class MediaAsset(Base):
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
-    visibility: Mapped[str] = mapped_column(String(20), default="private")
-    upload_status: Mapped[str] = mapped_column(String(20), default="ready")
-    exif_status: Mapped[str] = mapped_column(String(24), default="not_applicable")
-    scan_status: Mapped[str] = mapped_column(String(20), default="not_scanned")
+    visibility: Mapped[Literal["private"]] = mapped_column(String(20), default="private")
+    upload_status: Mapped[Literal["pending", "processing", "ready", "failed"]] = mapped_column(
+        String(20), default="ready"
+    )
+    exif_status: Mapped[Literal["removed", "not_applicable"]] = mapped_column(
+        String(24), default="not_applicable"
+    )
+    scan_status: Mapped[
+        Literal["not_scanned", "pending", "scanning", "clean", "infected", "error"]
+    ] = mapped_column(String(20), default="not_scanned")
     failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     processing_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     thumbnail_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -192,7 +204,18 @@ class ImageGenerationJob(Base):
     style_id: Mapped[str] = mapped_column(String(64))
     prompt: Mapped[str] = mapped_column(Text)
     negative_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    preservation_level: Mapped[Literal["balanced", "high"]] = mapped_column(
+        String(20), default="balanced"
+    )
+    recipe_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    caption_mode: Mapped[Literal["none", "travel_stamp"]] = mapped_column(
+        String(24), default="none"
+    )
+    caption_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    companion_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[Literal["queued", "running", "succeeded", "failed"]] = mapped_column(
+        String(20), default="queued", index=True
+    )
     provider_job_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
     output_storage_key: Mapped[str | None] = mapped_column(String(512), unique=True, nullable=True)
     output_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -201,7 +224,23 @@ class ImageGenerationJob(Base):
     failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     failure_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     provider_metadata: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ImageJobMutation(Base):
+    __tablename__ = "image_job_mutations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "client_request_id", name="uq_image_job_mutation_user_request"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    target_job_id: Mapped[uuid.UUID] = mapped_column(index=True)
+    client_request_id: Mapped[uuid.UUID] = mapped_column()
+    operation: Mapped[str] = mapped_column(String(20))
+    response_snapshot: Mapped[dict[str, object]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

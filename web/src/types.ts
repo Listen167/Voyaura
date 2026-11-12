@@ -18,12 +18,24 @@ export interface VisitedCity {
   check_in_source: 'device' | 'ip' | 'manual'
 }
 
+export interface MapYearCityActivity {
+  adcode: string
+  memory_count: number
+}
+
+export interface MapYearSummary {
+  year: number
+  stats: MapStats
+  cities: MapYearCityActivity[]
+}
+
 export interface MapOverview {
   username: string
   map_center: [number, number]
   default_zoom: number
   stats: MapStats
   visited_cities: VisitedCity[]
+  year_summaries: MapYearSummary[]
 }
 
 export interface CheckInCoordinates {
@@ -69,6 +81,110 @@ export interface CheckInPreview {
 export interface CheckInConfirmResult {
   status: 'created' | 'updated'
   city: VisitedCity
+}
+
+export interface PoiSearchDraft {
+  keywords: string
+  city_adcode: string
+  category: string
+  page: number
+  page_size: number
+}
+
+export interface PoiItem {
+  id: string
+  name: string
+  category: string
+  typecode: string
+  address: string
+  province: string
+  city: string
+  district: string
+  adcode: string
+  longitude: number
+  latitude: number
+  coordinate_system: 'GCJ02'
+  telephone: string | null
+  rating: string | null
+  average_cost: string | null
+  opening_hours: string | null
+  navigation_url: string
+}
+
+export interface PoiSearchResult {
+  keywords: string
+  city_adcode: string
+  total: number
+  page: number
+  page_size: number
+  items: PoiItem[]
+  provider: 'amap'
+  queried_at: string
+}
+
+export interface PoiDetailResult {
+  item: PoiItem
+  provider: 'amap'
+  queried_at: string
+}
+
+export type LocalRouteMode = 'walking' | 'transit' | 'driving'
+export type IntercityRouteMode = 'train' | 'high_speed_rail' | 'flight'
+
+export interface RouteCoordinate {
+  longitude: number
+  latitude: number
+}
+
+export interface LocalRouteDraft {
+  mode: LocalRouteMode
+  origin: RouteCoordinate
+  destination: RouteCoordinate
+  origin_adcode: string
+  destination_adcode: string
+}
+
+export interface RouteStep {
+  instruction: string
+  distance_meters: number
+  duration_seconds: number | null
+  road_name: string | null
+  transport: string
+}
+
+export interface RouteOption {
+  distance_meters: number
+  duration_seconds: number
+  walking_distance_meters: number | null
+  tolls_yuan: number | null
+  taxi_cost_yuan: number | null
+  steps: RouteStep[]
+}
+
+export interface LocalRouteResult {
+  mode: LocalRouteMode
+  origin: RouteCoordinate
+  destination: RouteCoordinate
+  coordinate_system: 'GCJ02'
+  provider: 'amap'
+  queried_at: string
+  options: RouteOption[]
+}
+
+export interface RouteProviderCapability {
+  mode: LocalRouteMode | IntercityRouteMode
+  provider: string
+  available: boolean
+  state: 'available' | 'configuration_required' | 'partner_required'
+  data_scope: string[]
+  application_url: string | null
+  notice: string
+}
+
+export interface RouteCapabilities {
+  local: RouteProviderCapability[]
+  intercity: RouteProviderCapability[]
+  queried_at: string
 }
 
 export interface MemoryMediaAsset {
@@ -260,6 +376,184 @@ export interface MediaDeleteConfirmResult {
   asset_id: string
   memory_id: string
   city_adcode: string
+}
+
+export type ImagePreservationLevel = 'balanced' | 'high'
+export type ImageCaptionLayout = 'archive_band' | 'postcard_corner' | 'vertical_stamp'
+export type ImageCaptionPalette = 'coral' | 'forest' | 'ink'
+export type ImageCaptionFontStyle = 'sans' | 'serif'
+
+export interface ImageStyleRecipe {
+  version: string
+  aspect_ratio: string
+  layout: string
+  focal_element: string
+  typography: string
+  color: string
+  texture: string
+  default_preservation: ImagePreservationLevel
+  preservation_level: ImagePreservationLevel | null
+}
+
+export interface ImageStyleSource {
+  name: string
+  version: string
+  url: string
+  license: string
+}
+
+export interface ImageCaption {
+  title: string
+  location: string
+  date: string
+  layout: ImageCaptionLayout
+  palette: ImageCaptionPalette
+  font_style: ImageCaptionFontStyle
+}
+
+export interface XiaoxiPhotoCapability {
+  available: boolean
+  missing_settings: string[]
+  asset_version: string | null
+  positions: Array<'left' | 'right'>
+  scales: Array<'small' | 'medium' | 'large'>
+  poses: string[]
+  expressions: string[]
+}
+
+export interface ImageCompanion {
+  asset_version: string | null
+  pose: string
+  expression: string
+  position: 'left' | 'right'
+  scale: 'small' | 'medium' | 'large'
+  method: string
+  disclosure: string
+}
+
+export interface ImageStyle {
+  id: string
+  name: string
+  description: string
+  swatch: string
+  recipe: ImageStyleRecipe
+  source: ImageStyleSource | null
+}
+
+export interface ImageStyleCatalog {
+  provider: string
+  available: boolean
+  missing_settings: string[]
+  styles: ImageStyle[]
+  companion: XiaoxiPhotoCapability
+}
+
+export interface ImageJobDraft {
+  username: string
+  source_asset_id: string
+  style_id: string
+  prompt: string
+  negative_prompt: string | null
+  preservation_level: ImagePreservationLevel
+  caption_mode: 'none' | 'travel_stamp'
+  caption_layout: ImageCaptionLayout
+  caption_palette: ImageCaptionPalette
+  caption_font_style: ImageCaptionFontStyle
+  companion_enabled: boolean
+  companion_position: 'left' | 'right'
+  companion_scale: 'small' | 'medium' | 'large'
+}
+
+export interface ImageJobCreateDraft extends ImageJobDraft {
+  client_request_id: string
+}
+
+export interface ImageJobPreview {
+  source_asset_id: string
+  source_filename: string
+  city_adcode: string
+  city_name: string
+  memory_id: string
+  memory_title: string
+  style: ImageStyle
+  recipe: ImageStyleRecipe
+  effective_prompt: string
+  negative_prompt: string
+  preservation_level: ImagePreservationLevel
+  caption_mode: 'none' | 'travel_stamp'
+  caption: ImageCaption | null
+  companion: ImageCompanion | null
+  companion_available: boolean
+  companion_missing_settings: string[]
+  provider: string
+  provider_available: boolean
+  confirmation_notice: string
+}
+
+export interface ImageJob {
+  id: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  source_asset_id: string
+  source_filename: string
+  source_url: string | null
+  source_thumbnail_url: string | null
+  city_adcode: string
+  city_name: string
+  memory_id: string
+  memory_title: string
+  style_id: string
+  provider: string
+  provider_job_id: string | null
+  prompt: string
+  negative_prompt: string | null
+  preservation_level: ImagePreservationLevel
+  recipe: ImageStyleRecipe
+  style_source: ImageStyleSource | null
+  model_names: string[]
+  caption_mode: 'none' | 'travel_stamp'
+  caption: ImageCaption | null
+  companion: ImageCompanion | null
+  is_favorite: boolean
+  output_url: string | null
+  download_url: string | null
+  output_mime_type: string | null
+  output_width: number | null
+  output_height: number | null
+  failure_code: string | null
+  failure_message: string | null
+  retryable: boolean
+  created_at: string
+  completed_at: string | null
+}
+
+export interface ImageJobCreateResult {
+  status: 'created' | 'existing'
+  job: ImageJob
+}
+
+export interface ImageJobList {
+  items: ImageJob[]
+}
+
+export interface ImageJobDeleteDraft {
+  username?: string
+  client_request_id: string
+}
+
+export interface ImageJobDeletePreview {
+  job_id: string
+  source_filename: string
+  city_name: string
+  memory_title: string
+  style: ImageStyle
+  status: ImageJob['status']
+  has_output: boolean
+  confirmation_notice: string
+}
+
+export interface ImageJobDeleteResult {
+  status: 'deleted' | 'existing'
+  job_id: string
 }
 
 export interface AppErrorInfo {

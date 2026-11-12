@@ -7,15 +7,18 @@ import {
   FileText,
   Film,
   LoaderCircle,
+  List,
   LockKeyhole,
   MessageCircle,
   ImagePlus,
   Pencil,
   PenLine,
   RefreshCw,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
 import type {
   AppErrorInfo,
   CityMemoryDetail,
@@ -25,7 +28,7 @@ import type {
   VisitedCity,
 } from '../types'
 
-defineProps<{
+const props = defineProps<{
   city: VisitedCity
   phase: 'loading' | 'ready' | 'error'
   detail: CityMemoryDetail | null
@@ -45,7 +48,30 @@ defineEmits<{
   uploadMedia: [memory: CityMemoryItem]
   retryMedia: [task: MediaTaskItem]
   deleteMedia: [memoryId: string, asset: MemoryMediaAsset | MediaTaskItem]
+  stylePhoto: [memory: CityMemoryItem, asset: MemoryMediaAsset]
 }>()
+
+const archiveMode = ref<'journal' | 'gallery'>('journal')
+
+const galleryGroups = computed(() => {
+  const groups = new Map<string, {
+    date: string
+    label: string
+    items: Array<{ memory: CityMemoryItem, asset: MemoryMediaAsset }>
+  }>()
+  for (const memory of props.detail?.memories ?? []) {
+    if (!memory.media.length) continue
+    const date = memory.occurred_at.slice(0, 10)
+    const group = groups.get(date) ?? {
+      date,
+      label: formatDate(memory.occurred_at),
+      items: [],
+    }
+    for (const asset of memory.media) group.items.push({ memory, asset })
+    groups.set(date, group)
+  }
+  return [...groups.values()]
+})
 
 const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric',
@@ -116,6 +142,11 @@ function mediaTaskLabel(task: MediaTaskItem): string {
 
         <p v-if="detail.visit_note" class="visit-note"><FileText :size="16" />{{ detail.visit_note }}</p>
 
+        <div class="archive-mode-switch" role="tablist" aria-label="城市档案视图">
+          <button type="button" role="tab" :aria-selected="archiveMode === 'journal'" :class="{ active: archiveMode === 'journal' }" @click="archiveMode = 'journal'"><List :size="15" />旅程</button>
+          <button type="button" role="tab" :aria-selected="archiveMode === 'gallery'" :class="{ active: archiveMode === 'gallery' }" @click="archiveMode = 'gallery'"><Camera :size="15" />影像</button>
+        </div>
+
         <section v-if="mediaTasks.length || mediaTaskError" class="media-task-section" aria-labelledby="media-task-title">
           <header>
             <div><AlertTriangle :size="15" /><h3 id="media-task-title">媒体任务</h3></div>
@@ -143,7 +174,7 @@ function mediaTaskLabel(task: MediaTaskItem): string {
           </ul>
         </section>
 
-        <section v-if="detail.memories.length" class="memory-timeline" aria-label="城市记忆时间线">
+        <section v-if="archiveMode === 'journal' && detail.memories.length" class="memory-timeline" aria-label="城市记忆时间线">
           <article v-for="memory in detail.memories" :key="memory.id">
             <time :datetime="memory.occurred_at">{{ formatDate(memory.occurred_at) }}</time>
             <div>
@@ -187,10 +218,37 @@ function mediaTaskLabel(task: MediaTaskItem): string {
           </article>
         </section>
 
-        <section v-else class="city-memory-empty">
+        <section v-else-if="archiveMode === 'journal'" class="city-memory-empty">
           <span><Camera :size="25" /></span>
           <strong>这里还没有旅行记忆</strong>
           <p>到访记录已经保存，照片、Vlog 与手记仍为空。</p>
+        </section>
+
+        <section v-else-if="galleryGroups.length" class="city-gallery" aria-label="城市照片墙与 Vlog 时间线">
+          <article v-for="group in galleryGroups" :key="group.date" class="gallery-day">
+            <header><time :datetime="group.date">{{ group.label }}</time><span>{{ group.items.length }} 段影像</span></header>
+            <ul>
+              <li v-for="item in group.items" :key="item.asset.id">
+                <a v-if="item.asset.content_url" :href="item.asset.content_url" target="_blank" rel="noreferrer" :aria-label="`查看 ${item.asset.original_filename}`">
+                  <img v-if="item.asset.thumbnail_url" :src="item.asset.thumbnail_url" :alt="item.asset.original_filename" />
+                  <span v-else><Camera v-if="item.asset.kind === 'photo'" :size="21" /><Film v-else :size="21" /></span>
+                  <Film v-if="item.asset.kind === 'vlog'" class="gallery-video-mark" :size="17" />
+                </a>
+                <span v-else class="gallery-placeholder"><Camera v-if="item.asset.kind === 'photo'" :size="21" /><Film v-else :size="21" /></span>
+                <div class="gallery-item-actions">
+                  <button v-if="item.asset.kind === 'photo'" type="button" :title="`创作 ${item.asset.original_filename}`" :aria-label="`创作 ${item.asset.original_filename}`" @click="$emit('stylePhoto', item.memory, item.asset)"><Sparkles :size="14" /></button>
+                  <button class="danger" type="button" :title="`删除 ${item.asset.original_filename}`" :aria-label="`删除 ${item.asset.original_filename}`" @click="$emit('deleteMedia', item.memory.id, item.asset)"><Trash2 :size="14" /></button>
+                </div>
+                <div class="gallery-caption"><strong>{{ item.memory.title }}</strong><small>{{ item.asset.kind === 'photo' ? '照片' : 'Vlog' }}</small></div>
+              </li>
+            </ul>
+          </article>
+        </section>
+
+        <section v-else class="city-memory-empty">
+          <span><Camera :size="25" /></span>
+          <strong>这座城市还没有影像</strong>
+          <p>从旅程页选择一段记忆并添加照片或 Vlog。</p>
         </section>
       </div>
 

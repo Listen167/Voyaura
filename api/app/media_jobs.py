@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Protocol
 
 from sqlalchemy.orm import Session
 
@@ -13,19 +14,31 @@ from app.config import settings
 from app.database import SessionLocal
 from app.errors import AppError
 from app.integrations.media_processing import create_photo_thumbnail, create_video_cover
-from app.integrations.media_scanner import MediaScanner, get_media_scanner
-from app.integrations.media_storage import MediaStorage, get_media_storage
+from app.integrations.media_scanner import ScanResult, get_media_scanner
+from app.integrations.media_storage import get_media_storage
 from app.models import MediaAsset
 
 SessionFactory = Callable[[], Session]
 logger = logging.getLogger("voyaura.media-jobs")
 
 
+class MediaProcessingStorage(Protocol):
+    def download_to_file(self, storage_key: str, path: str, *, max_bytes: int) -> None: ...
+
+    def upload_file(self, storage_key: str, path: str, *, content_type: str) -> None: ...
+
+    def remove(self, storage_key: str) -> None: ...
+
+
+class MediaProcessingScanner(Protocol):
+    def scan(self, path: str) -> ScanResult: ...
+
+
 def process_media_asset(
     asset_id: str | uuid.UUID,
     *,
-    storage: MediaStorage | None = None,
-    scanner: MediaScanner | None = None,
+    storage: MediaProcessingStorage | None = None,
+    scanner: MediaProcessingScanner | None = None,
     session_factory: SessionFactory = SessionLocal,
 ) -> str:
     media_storage = storage or get_media_storage()

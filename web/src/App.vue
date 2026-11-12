@@ -9,20 +9,25 @@ import {
   confirmCityMemoryUpdate,
   confirmMediaDelete,
   completeMediaUpload,
+  createImageJob,
   confirmManualCheckIn,
   createMediaUploadIntent,
   emptyOverview,
   getCityMemories,
   getCityMediaTasks,
   getMediaProcessingStatus,
+  getImageJob,
+  getImageStyles,
   getMapOverview,
   previewCheckIn,
   previewCityMemory,
   previewCityMemoryDelete,
   previewCityMemoryUpdate,
   previewMediaUpload,
+  previewImageJob,
   previewManualCheckIn,
   previewMediaDelete,
+  searchPois,
   uploadMediaFile,
 } from './api/client'
 import AppNavigation from './components/AppNavigation.vue'
@@ -32,6 +37,8 @@ import MemoryComposerDialog from './components/MemoryComposerDialog.vue'
 import MemoryDeleteDialog from './components/MemoryDeleteDialog.vue'
 import MediaDeleteDialog from './components/MediaDeleteDialog.vue'
 import MediaUploadDialog from './components/MediaUploadDialog.vue'
+import ImageStyleDialog from './components/ImageStyleDialog.vue'
+import PoiSearchDialog from './components/PoiSearchDialog.vue'
 import { locateCityByIp, searchCities } from './location/amapCity'
 import type {
   AppErrorInfo,
@@ -46,6 +53,10 @@ import type {
   CityMemoryItem,
   CityMemoryPreview,
   CityMemoryUpdatePreview,
+  ImageJob,
+  ImageJobCreateDraft,
+  ImageJobPreview,
+  ImageStyleCatalog,
   ManualCityCheckIn,
   MapOverview,
   MediaDeleteDraft,
@@ -57,9 +68,13 @@ import type {
   MediaUploadProgress,
   MemoryMediaAsset,
   NewMemoryInput,
+  PoiSearchDraft,
+  PoiSearchResult,
   VisitedCity,
 } from './types'
 import EmptyView from './views/EmptyView.vue'
+import ImageStudioView from './views/ImageStudioView.vue'
+import JourneyPlannerView from './views/JourneyPlannerView.vue'
 import MapHomeView from './views/MapHomeView.vue'
 
 const activeView = ref<AppView>('map')
@@ -113,8 +128,22 @@ const mediaUploadTransferred = ref(false)
 const mediaUploadCompleted = ref(false)
 const mediaUploadError = ref<AppErrorInfo | null>(null)
 const mediaUploadProgress = ref<MediaUploadProgress>({ loaded: 0, total: 0, percent: 0 })
+const imageStyleCity = ref<VisitedCity | null>(null)
+const imageStyleMemory = ref<CityMemoryItem | null>(null)
+const imageStyleAsset = ref<MemoryMediaAsset | null>(null)
+const imageStyleCatalog = ref<ImageStyleCatalog | null>(null)
+const imageStylePhase = ref<'loading' | 'editing' | 'preview' | 'creating' | 'processing' | 'success' | 'error'>('loading')
+const imageStyleDraft = ref<ImageJobCreateDraft | null>(null)
+const imageStylePreview = ref<ImageJobPreview | null>(null)
+const imageStyleJob = ref<ImageJob | null>(null)
+const imageStyleError = ref<AppErrorInfo | null>(null)
+const poiSearchOpen = ref(false)
+const poiSearchPhase = ref<'editing' | 'loading' | 'results' | 'error'>('editing')
+const poiSearchResult = ref<PoiSearchResult | null>(null)
+const poiSearchError = ref<AppErrorInfo | null>(null)
 let mediaUploadAbortController: AbortController | null = null
 let mediaUploadPollVersion = 0
+let imageStylePollVersion = 0
 const checkInBusy = computed(() => checkInPhase.value === 'locating' || checkInPhase.value === 'confirming')
 
 onMounted(async () => {
@@ -133,6 +162,31 @@ function localError(code: string, message: string, retryable = true): AppErrorIn
 function normalizeError(error: unknown): AppErrorInfo {
   if (error instanceof ApiClientError) return error
   return localError('UNKNOWN_CLIENT_ERROR', '发生了未识别的客户端错误。', false)
+}
+
+function openPoiSearch() {
+  poiSearchOpen.value = true
+  poiSearchPhase.value = 'editing'
+  poiSearchResult.value = null
+  poiSearchError.value = null
+}
+
+function closePoiSearch() {
+  poiSearchOpen.value = false
+  poiSearchResult.value = null
+  poiSearchError.value = null
+}
+
+async function searchCityPois(draft: PoiSearchDraft) {
+  poiSearchPhase.value = 'loading'
+  poiSearchError.value = null
+  try {
+    poiSearchResult.value = await searchPois(draft)
+    poiSearchPhase.value = 'results'
+  } catch (error) {
+    poiSearchError.value = normalizeError(error)
+    poiSearchPhase.value = 'error'
+  }
 }
 
 function geolocationError(error: GeolocationPositionError): AppErrorInfo {
@@ -637,6 +691,127 @@ async function retryMediaTask(task: MediaTaskItem) {
   }
 }
 
+async function openImageStyle(memory: CityMemoryItem, asset: MemoryMediaAsset) {
+  if (!selectedCity.value || asset.kind !== 'photo') return
+  imageStylePollVersion += 1
+  imageStyleCity.value = selectedCity.value
+  imageStyleMemory.value = memory
+  imageStyleAsset.value = asset
+  imageStyleCatalog.value = null
+  imageStyleDraft.value = null
+  imageStylePreview.value = null
+  imageStyleJob.value = null
+  imageStyleError.value = null
+  imageStylePhase.value = 'loading'
+  try {
+    imageStyleCatalog.value = await getImageStyles()
+    imageStylePhase.value = 'editing'
+  } catch (error) {
+    imageStyleError.value = normalizeError(error)
+    imageStylePhase.value = 'error'
+  }
+}
+
+function closeImageStyle() {
+  imageStylePollVersion += 1
+  imageStyleCity.value = null
+  imageStyleMemory.value = null
+  imageStyleAsset.value = null
+  imageStyleCatalog.value = null
+  imageStyleDraft.value = null
+  imageStylePreview.value = null
+  imageStyleJob.value = null
+  imageStyleError.value = null
+}
+
+async function previewSelectedImageStyle(draft: {
+  style_id: string
+  prompt: string
+  negative_prompt: string | null
+  preservation_level: 'balanced' | 'high'
+  caption_mode: 'none' | 'travel_stamp'
+  caption_layout: 'archive_band' | 'postcard_corner' | 'vertical_stamp'
+  caption_palette: 'coral' | 'forest' | 'ink'
+  caption_font_style: 'sans' | 'serif'
+  companion_enabled: boolean
+  companion_position: 'left' | 'right'
+  companion_scale: 'small' | 'medium' | 'large'
+}) {
+  if (!imageStyleAsset.value) return
+  imageStyleError.value = null
+  imageStyleDraft.value = {
+    username: 'AuroraRovella',
+    client_request_id: crypto.randomUUID(),
+    source_asset_id: imageStyleAsset.value.id,
+    ...draft,
+  }
+  try {
+    imageStylePreview.value = await previewImageJob(imageStyleDraft.value)
+    imageStylePhase.value = 'preview'
+  } catch (error) {
+    imageStyleError.value = normalizeError(error)
+    imageStylePhase.value = 'error'
+  }
+}
+
+function editImageStyle() {
+  imageStylePollVersion += 1
+  imageStylePreview.value = null
+  imageStyleJob.value = null
+  imageStyleError.value = null
+  imageStylePhase.value = imageStyleCatalog.value ? 'editing' : 'loading'
+}
+
+async function confirmImageStyle() {
+  if (!imageStyleDraft.value) {
+    imageStyleError.value = localError(
+      'IMAGE_JOB_CONTEXT_LOST',
+      '图片生成上下文已失效，请重新选择风格。',
+      false,
+    )
+    imageStylePhase.value = 'error'
+    return
+  }
+  const pollVersion = ++imageStylePollVersion
+  imageStylePhase.value = 'creating'
+  imageStyleError.value = null
+  try {
+    const created = await createImageJob(imageStyleDraft.value)
+    if (pollVersion !== imageStylePollVersion) return
+    imageStyleJob.value = created.job
+    imageStylePhase.value = 'processing'
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      if (pollVersion !== imageStylePollVersion) return
+      if (attempt > 0) await wait(2000)
+      const job = await getImageJob(created.job.id)
+      if (pollVersion !== imageStylePollVersion) return
+      imageStyleJob.value = job
+      if (job.status === 'succeeded') {
+        imageStylePhase.value = 'success'
+        return
+      }
+      if (job.status === 'failed') {
+        throw new ApiClientError({
+          code: job.failure_code ?? 'IMAGE_GENERATION_ERROR',
+          message: job.failure_message ?? '图片生成失败。',
+          details: { job_id: job.id, provider: job.provider },
+          retryable: job.retryable,
+        })
+      }
+    }
+    throw new ApiClientError({
+      code: 'IMAGE_GENERATION_TIMEOUT',
+      message: '图片仍在生成，可以稍后重新查询任务。',
+      details: { job_id: created.job.id },
+      retryable: true,
+    })
+  } catch (error) {
+    if (pollVersion !== imageStylePollVersion) return
+    imageStyleError.value = normalizeError(error)
+    imageStylePhase.value = 'error'
+  }
+}
+
 function openMediaUpload(memory: CityMemoryItem) {
   if (!selectedCity.value) return
   mediaUploadPollVersion += 1
@@ -865,8 +1040,15 @@ async function confirmMediaUpload() {
       :check-in-busy="checkInBusy"
       @open-xiaoxi="openXiaoxi"
       @request-check-in="startCheckIn"
+      @search-poi="openPoiSearch"
       @select-city="selectCity"
     />
+    <JourneyPlannerView
+      v-else-if="activeView === 'journeys'"
+      :overview="overview"
+      @back="activeView = 'map'"
+    />
+    <ImageStudioView v-else-if="activeView === 'studio'" @back="activeView = 'map'" />
     <EmptyView v-else :view="activeView" @back="activeView = 'map'" />
 
     <AppNavigation class="mobile-nav" :active-view="activeView" @select="activeView = $event" />
@@ -891,6 +1073,18 @@ async function confirmMediaUpload() {
       />
     </Transition>
 
+    <Transition name="dialog">
+      <PoiSearchDialog
+        v-if="poiSearchOpen"
+        :cities="overview.visited_cities"
+        :phase="poiSearchPhase"
+        :result="poiSearchResult"
+        :error="poiSearchError"
+        @close="closePoiSearch"
+        @search="searchCityPois"
+      />
+    </Transition>
+
     <Transition name="panel">
       <CityMemoryPanel
         v-if="selectedCity"
@@ -910,6 +1104,7 @@ async function confirmMediaUpload() {
         @upload-media="openMediaUpload"
         @retry-media="retryMediaTask"
         @delete-media="openMediaDelete"
+        @style-photo="openImageStyle"
       />
     </Transition>
 
@@ -929,6 +1124,24 @@ async function confirmMediaUpload() {
         @cancel-upload="cancelMediaUpload"
         @retry="confirmMediaUpload"
         @edit="editMediaSelection"
+      />
+    </Transition>
+
+    <Transition name="dialog">
+      <ImageStyleDialog
+        v-if="imageStyleCity && imageStyleMemory && imageStyleAsset"
+        :city="imageStyleCity"
+        :memory="imageStyleMemory"
+        :asset="imageStyleAsset"
+        :catalog="imageStyleCatalog"
+        :phase="imageStylePhase"
+        :preview="imageStylePreview"
+        :job="imageStyleJob"
+        :error="imageStyleError"
+        @close="closeImageStyle"
+        @preview="previewSelectedImageStyle"
+        @confirm="confirmImageStyle"
+        @edit="editImageStyle"
       />
     </Transition>
 

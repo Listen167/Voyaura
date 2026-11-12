@@ -3,7 +3,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.errors import install_error_handlers
-from app.routers import check_ins, city_memories, health, map_overview, media_uploads, users
+from app.routers import (
+    check_ins,
+    city_memories,
+    city_tools,
+    health,
+    image_generation,
+    map_overview,
+    media_uploads,
+    route_tools,
+    users,
+)
 
 app = FastAPI(
     title="Voyaura API",
@@ -25,6 +35,9 @@ app.include_router(health.router)
 app.include_router(users.router, prefix="/api/v1")
 app.include_router(map_overview.router, prefix="/api/v1")
 app.include_router(check_ins.router, prefix="/api/v1")
+app.include_router(city_tools.router, prefix="/api/v1")
+app.include_router(route_tools.router, prefix="/api/v1")
 app.include_router(city_memories.router, prefix="/api/v1")
 app.include_router(media_uploads.router, prefix="/api/v1")
+app.include_router(image_generation.router, prefix="/api/v1")
 

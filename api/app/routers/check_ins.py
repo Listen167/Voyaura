@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -37,7 +37,7 @@ def preview_resolved_city(
     resolved: ResolvedCity,
     *,
     accuracy_meters: float | None,
-    location_source: str,
+    location_source: Literal["device", "ip", "manual"],
 ) -> CheckInPreviewOut:
     already_lit = db.scalar(
         select(CityVisit)
@@ -62,7 +62,7 @@ def upsert_visit(
     user: User,
     resolved: ResolvedCity,
     *,
-    source: str,
+    source: Literal["device", "ip", "manual"],
 ) -> CheckInConfirmOut:
     city = db.scalar(select(City).where(City.adcode == resolved.adcode))
     if city is None:

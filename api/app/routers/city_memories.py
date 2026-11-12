@@ -2,7 +2,7 @@ import hashlib
 import json
 import uuid
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import select
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.errors import AppError
 from app.integrations.media_storage import MediaStorage, get_media_storage
-from app.models import City, CityMemory, CityVisit, MemoryMutation, User, utcnow
+from app.models import City, CityMemory, CityVisit, ImageGenerationJob, MemoryMutation, User, utcnow
 from app.schemas import (
     CityMemoryConfirmOut,
     CityMemoryDeleteConfirmOut,
@@ -82,7 +82,7 @@ def memory_out(memory: CityMemory, storage: MediaStorage | None = None) -> CityM
                 visibility=asset.visibility,
                 upload_status="ready",
                 exif_status=asset.exif_status,
-                scan_status=asset.scan_status,
+                scan_status=cast(Literal["clean", "not_scanned"], asset.scan_status),
                 thumbnail_url=(
                     storage.presigned_get(
                         asset.thumbnail_key,
@@ -445,6 +445,13 @@ def confirm_memory_delete(
             response_snapshot=response.model_dump(mode="json"),
         )
     )
+    generated_jobs = db.scalars(
+        select(ImageGenerationJob).where(ImageGenerationJob.memory_id == memory.id)
+    ).all()
+    for generated_job in generated_jobs:
+        if generated_job.output_storage_key:
+            storage.remove(generated_job.output_storage_key)
+        db.delete(generated_job)
     for asset in memory.media_assets:
         if asset.thumbnail_key:
             storage.remove(asset.thumbnail_key)

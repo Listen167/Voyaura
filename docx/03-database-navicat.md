@@ -79,6 +79,34 @@ WHERE username = 'AuroraRovella';
 
 不要直接在 Navicat 中删除 `media_assets` 行：这样会遗留 MinIO 对象并绕过二次确认和幂等记录。应通过媒体删除预览/确认接口操作。
 
+### image_generation_jobs
+
+照片风格生成任务。记录用户、城市、记忆、私有源照片、Provider、风格、最终 Prompt、收藏状态 `is_favorite`、任务状态和私有输出对象键。`user_id + client_request_id` 保证重复确认不会创建多项任务；状态依次为 `queued`、`running`、`succeeded` 或 `failed`。
+
+ComfyUI 的 `prompt_id` 只保存在 `provider_job_id`，Provider 返回的非敏感输出描述保存在 `provider_metadata`。生成图片本身存放在 MinIO，并统一重新编码为 WebP，不在数据库中保存二进制内容。删除源照片或整段记忆时，业务接口会同时删除生成图与任务记录。
+
+`0011_image_recipes` 新增 `preservation_level` 和
+`recipe_snapshot`。前者记录创建任务时选择的“平衡/高保真”，后者保存当时使用的
+Recipe 版本、画幅、布局、焦点、排版、颜色与纹理，避免风格目录升级后历史作品失去
+可解释性。ComfyUI workflow 中可识别的 checkpoint/UNet/模型名称保存在
+`provider_metadata.model_names`，不单独建立模型表。
+
+`0012_image_captions` 新增 `caption_mode` 和 `caption_snapshot`。选择
+`travel_stamp` 时，任务创建阶段会冻结记忆标题、城市名和记忆日期；worker 在
+Provider 输出完成后使用 Pillow 写入这些文字。即使之后编辑城市记忆，历史生成图的
+文字来源仍可追溯。默认 `none` 不进行任何文字排版。
+
+`0013_xiaoxi_photo` 新增 `companion_snapshot`。只在用户选择小曦合照且
+授权素材配置完整时写入，保存素材版本、站位、尺寸、动作、表情、合成方法和展示
+声明，不保存本机素材路径。生成输出仍使用原来的 MinIO 私有对象，删除图片任务会
+同时删除合照结果。
+
+### image_job_mutations
+
+图片任务删除的幂等记录。保存用户、已删除的任务 ID、操作类型、请求编号和响应快照。`user_id + client_request_id` 唯一约束保证网络重试不会重复执行删除。`target_job_id` 刻意不建立外键，因此任务行删除后仍能识别同一次确认请求。
+
+不要直接在 Navicat 中删除 `image_generation_jobs`：这样可能遗留 MinIO 生成图，也会绕过运行中保护、二次确认和幂等记录。应使用图片任务删除预览与确认接口。
+
 ## 后续表计划
 
 - `trips`、`trip_days`、`trip_members`

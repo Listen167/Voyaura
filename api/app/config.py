@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     media_cleanup_batch_size: int = 100
     image_provider: str = "disabled"
     image_queue_key: str = "voyaura:image:jobs"
+    image_caption_font_path: str = ""
+    xiaoxi_photo_asset_path: str = ""
+    xiaoxi_photo_asset_version: str = "unconfigured"
     comfyui_base_url: str = "http://127.0.0.1:8188"
     comfyui_workflow_path: str = ""
     comfyui_input_node_id: str = ""

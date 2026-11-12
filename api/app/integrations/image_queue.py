@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Protocol, cast
 
 from redis import Redis
 from redis.exceptions import RedisError
@@ -9,10 +10,19 @@ from app.config import settings
 from app.errors import AppError
 
 
+class RedisQueueClient(Protocol):
+    def rpush(self, key: str, value: str) -> object: ...
+
+    def blpop(self, keys: list[str], timeout: int = 0) -> list[str] | None: ...
+
+
 class ImageJobQueue:
     def __init__(self, redis_url: str, queue_key: str) -> None:
         self.queue_key = queue_key
-        self.client = Redis.from_url(redis_url, decode_responses=True)
+        self.client = cast(
+            RedisQueueClient,
+            Redis.from_url(redis_url, decode_responses=True),
+        )
 
     def enqueue(self, job_id: str) -> None:
         try:
@@ -28,7 +38,7 @@ class ImageJobQueue:
 
     def dequeue(self, timeout_seconds: int = 5) -> str | None:
         try:
-            item = self.client.blpop(self.queue_key, timeout=timeout_seconds)
+            item = self.client.blpop([self.queue_key], timeout=timeout_seconds)
         except RedisError as exc:
             raise AppError(
                 "IMAGE_QUEUE_UNAVAILABLE",

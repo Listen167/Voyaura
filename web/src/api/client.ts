@@ -14,6 +14,16 @@ import type {
   CheckInPreview,
   ManualCityCheckIn,
   MapOverview,
+  ImageJob,
+  ImageJobCreateDraft,
+  ImageJobCreateResult,
+  ImageJobDeleteDraft,
+  ImageJobDeletePreview,
+  ImageJobDeleteResult,
+  ImageJobDraft,
+  ImageJobList,
+  ImageJobPreview,
+  ImageStyleCatalog,
   MediaDeleteConfirmResult,
   MediaDeleteDraft,
   MediaDeletePreview,
@@ -24,6 +34,12 @@ import type {
   MediaUploadIntent,
   MediaUploadPreview,
   MediaUploadProgress,
+  PoiDetailResult,
+  PoiSearchDraft,
+  PoiSearchResult,
+  LocalRouteDraft,
+  LocalRouteResult,
+  RouteCapabilities,
 } from '../types'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8001/api/v1'
@@ -34,6 +50,7 @@ export const emptyOverview: MapOverview = {
   default_zoom: 4.7,
   stats: { lit_cities: 0, memories: 0, photos: 0, vlog_minutes: 0 },
   visited_cities: [],
+  year_summaries: [],
 }
 
 interface ApiErrorEnvelope {
@@ -93,6 +110,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getMapOverview(username = 'AuroraRovella'): Promise<MapOverview> {
   return request(`/map/overview?username=${encodeURIComponent(username)}`)
+}
+
+export function searchPois(payload: PoiSearchDraft): Promise<PoiSearchResult> {
+  return request('/tools/poi/search', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function getPoiDetail(poiId: string): Promise<PoiDetailResult> {
+  return request(`/tools/poi/${encodeURIComponent(poiId)}`)
+}
+
+export function getRouteCapabilities(): Promise<RouteCapabilities> {
+  return request('/tools/routes/capabilities')
+}
+
+export function planLocalRoute(payload: LocalRouteDraft): Promise<LocalRouteResult> {
+  return request('/tools/routes/plan', { method: 'POST', body: JSON.stringify(payload) })
 }
 
 export function previewCheckIn(payload: CheckInCoordinates): Promise<CheckInPreview> {
@@ -347,4 +380,63 @@ export function confirmMediaDelete(
     `/cities/${encodeURIComponent(adcode)}/memories/${encodeURIComponent(memoryId)}/media/${encodeURIComponent(assetId)}/delete-confirm`,
     { method: 'POST', body: JSON.stringify(payload) },
   )
+}
+
+export function getImageStyles(): Promise<ImageStyleCatalog> {
+  return request('/image-styles')
+}
+
+export function previewImageJob(payload: ImageJobDraft): Promise<ImageJobPreview> {
+  return request('/image-jobs/preview', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function createImageJob(payload: ImageJobCreateDraft): Promise<ImageJobCreateResult> {
+  return request('/image-jobs', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export function getImageJob(
+  jobId: string,
+  username = 'AuroraRovella',
+): Promise<ImageJob> {
+  const params = new URLSearchParams({ username })
+  return request(`/image-jobs/${encodeURIComponent(jobId)}?${params.toString()}`)
+}
+
+export function getImageJobs(
+  username = 'AuroraRovella',
+  favoriteOnly = false,
+): Promise<ImageJobList> {
+  const params = new URLSearchParams({ username, favorite_only: String(favoriteOnly) })
+  return request(`/image-jobs?${params.toString()}`)
+}
+
+export function setImageJobFavorite(
+  jobId: string,
+  favorite: boolean,
+  username = 'AuroraRovella',
+): Promise<ImageJob> {
+  return request(`/image-jobs/${encodeURIComponent(jobId)}/favorite`, {
+    method: 'POST',
+    body: JSON.stringify({ username, favorite }),
+  })
+}
+
+export function previewImageJobDelete(
+  jobId: string,
+  payload: ImageJobDeleteDraft,
+): Promise<ImageJobDeletePreview> {
+  return request(`/image-jobs/${encodeURIComponent(jobId)}/delete-preview`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function confirmImageJobDelete(
+  jobId: string,
+  payload: ImageJobDeleteDraft,
+): Promise<ImageJobDeleteResult> {
+  return request(`/image-jobs/${encodeURIComponent(jobId)}/delete-confirm`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }

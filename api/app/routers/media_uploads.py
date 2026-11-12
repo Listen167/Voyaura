@@ -4,7 +4,7 @@ import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Query
 from fastapi import Path as ApiPath
@@ -17,7 +17,7 @@ from app.errors import AppError
 from app.integrations.media_processing import sanitize_image, validate_video_prefix
 from app.integrations.media_queue import MediaJobQueue, get_media_queue
 from app.integrations.media_storage import MediaStorage, get_media_storage
-from app.models import CityMemory, MediaAsset, MediaMutation
+from app.models import CityMemory, ImageGenerationJob, MediaAsset, MediaMutation
 from app.routers.city_memories import require_memory, require_visited_city
 from app.schemas import (
     MediaAssetOut,
@@ -159,7 +159,7 @@ def media_out(asset: MediaAsset, storage: MediaStorage | None = None) -> MediaAs
         visibility=asset.visibility,
         upload_status="ready",
         exif_status=asset.exif_status,
-        scan_status=asset.scan_status,
+        scan_status=cast(Literal["clean", "not_scanned"], asset.scan_status),
         thumbnail_url=(
             storage.presigned_get(asset.thumbnail_key, expires)
             if storage is not None and asset.thumbnail_key
@@ -546,7 +546,9 @@ def list_media_tasks(
                 kind=asset.kind,
                 original_filename=asset.original_filename,
                 byte_size=asset.byte_size,
-                upload_status=asset.upload_status,
+                upload_status=cast(
+                    Literal["pending", "processing", "failed"], asset.upload_status
+                ),
                 scan_status=asset.scan_status,
                 failure_code=asset.failure_code,
                 failure_message=asset.processing_error,
@@ -588,7 +590,7 @@ def preview_media_delete(
         kind=asset.kind,
         original_filename=asset.original_filename,
         byte_size=asset.byte_size,
-        upload_status=asset.upload_status,
+        upload_status=cast(Literal["pending", "ready", "failed"], asset.upload_status),
     )
 
 
@@ -632,6 +634,13 @@ def confirm_media_delete(
         memory_id=memory.id,
         city_adcode=city.adcode,
     )
+    generated_jobs = db.scalars(
+        select(ImageGenerationJob).where(ImageGenerationJob.source_asset_id == asset.id)
+    ).all()
+    for generated_job in generated_jobs:
+        if generated_job.output_storage_key:
+            storage.remove(generated_job.output_storage_key)
+        db.delete(generated_job)
     if asset.thumbnail_key:
         storage.remove(asset.thumbnail_key)
     storage.remove(asset.storage_key)
