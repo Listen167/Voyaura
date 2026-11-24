@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { request, uploadMediaFile } from './client'
+import { getMapOverview } from './map'
 import { clearSession, getAccessToken, setAccessToken } from './session'
 import type { MediaUploadIntent } from '../types'
 
@@ -14,8 +15,10 @@ describe('本页访问凭证边界', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: 'ok' }) })
     vi.stubGlobal('fetch', fetchMock)
     await request('/auth/me')
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/auth/me',
+    const [requestedUrl, requestInit] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(new URL(requestedUrl, 'http://local.test').pathname).toBe('/api/v1/auth/me')
+    expect(requestedUrl).not.toContain('explicit-test-token-only')
+    expect(requestInit).toEqual(
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer explicit-test-token-only' }),
       }),
@@ -23,6 +26,17 @@ describe('本页访问凭证边界', () => {
     expect(localStorage.setItem).not.toHaveBeenCalled()
     clearSession()
     expect(getAccessToken()).toBe('')
+  })
+  it('拆分后的地图模块同样发送当前会话令牌', async () => {
+    setAccessToken('explicit-test-token-only')
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await getMapOverview()
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(new URL(url, 'http://local.test').pathname).toBe('/api/v1/map/overview')
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer explicit-test-token-only' })
   })
   it('签名对象存储上传不携带API访问令牌', async () => {
     setAccessToken('explicit-test-token-only')

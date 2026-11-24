@@ -11,6 +11,23 @@ export interface UserCandidate {
   cost_yuan?: number | null
   must_visit?: boolean
 }
+export interface SelectedPoi {
+  id: string
+  name: string
+}
+export interface GuideReference {
+  place_name: string
+  excerpt: string
+  source_url: string | null
+}
+
+export interface StayReference {
+  from_minutes: number
+  to_minutes: number
+  source: string
+  source_url: string | null
+}
+
 export interface RunCreate {
   client_request_id: string
   kind: 'plan' | 'story'
@@ -27,10 +44,14 @@ export interface RunCreate {
   interests: string[]
   must_visit: string[]
   candidates: UserCandidate[]
+  selected_pois?: SelectedPoi[]
+  guide_references?: GuideReference[]
   allow_external: boolean
   allow_model: boolean
   allow_memory_access: boolean
   memory_ids: string[]
+  chat_message?: string
+  previous_run_id?: string
 }
 export interface AgentCandidate extends UserCandidate {
   id: string
@@ -47,6 +68,8 @@ export interface AgentStop {
   arrival: string
   departure: string
   stay_minutes: number
+  stay_source?: 'guide_reference' | 'user_provided' | 'planning_assumption'
+  stay_references?: StayReference[]
   timing_basis: 'provider' | 'planning_buffer' | 'user_schedule'
   source: string
 }
@@ -64,6 +87,8 @@ export interface AgentDay {
     distance_meters: number | null
     source: string
     queried_at: string | null
+    mode?: RunCreate['transport']
+    instructions?: string[]
   }>
 }
 export interface AgentEvent {
@@ -101,6 +126,8 @@ export interface AgentResult {
     vlog_count: number
   }>
   story_body?: string
+  chat?: Array<{ role: 'user' | 'assistant'; text: string }>
+  city_guide?: { title: string; note: string; source: string; reference_url: string } | null
 }
 export interface AgentRun {
   id: string
@@ -118,10 +145,23 @@ export interface AgentRun {
 export interface AgentCapabilities {
   amap_configured: boolean
   model_configured: boolean
+  chat_model_configured?: boolean
   intent_default: string
   privacy_notice: string
   limits: Record<string, number>
   tools: string[]
+}
+export interface CompanionMessage {
+  role: 'user' | 'assistant'
+  text: string
+  sources?: Array<{ label: string; url: string }>
+}
+export interface CompanionReply {
+  text: string
+  planning_request?: string | null
+  choices?: Array<{ label: string; message: string }>
+  sources?: CompanionMessage['sources']
+  source: 'local' | 'deepseek'
 }
 export interface Confirmation {
   confirmation_token: string
@@ -137,8 +177,16 @@ export interface DraftEdit {
   story_body?: string
   excluded_candidate_ids?: string[]
   daily_end?: string
+  guide_references?: GuideReference[]
 }
 export const getAgentCapabilities = () => request<AgentCapabilities>('/agent/capabilities')
+export const sendCompanionMessage = (payload: {
+  message: string
+  city_adcode: string
+  plan_id?: string
+  history: Array<Pick<CompanionMessage, 'role' | 'text'>>
+  allow_model: boolean
+}) => request<CompanionReply>('/agent/companion', { method: 'POST', body: JSON.stringify(payload) })
 export const listAgentRuns = () => request<{ items: AgentRun[] }>('/agent/runs')
 export const getAgentRun = (id: string) =>
   request<AgentRun>(`/agent/runs/${encodeURIComponent(id)}`)

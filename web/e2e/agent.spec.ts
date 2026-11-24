@@ -42,6 +42,7 @@ test('行程：用户输入→真实规划→修改→主动确认→刷新恢�
     .fill('[本地验收输入，非真实旅行] 两天轻松逛博物馆与公园')
   await page.getByLabel('出发日期', { exact: true }).fill('2026-12-01')
   await page.locator('.candidate-input > summary').click()
+  await page.locator('.manual-coordinate-entry > summary').click()
   const candidates = [
     ['[验收输入] 博物馆A', '113.32', '23.11'],
     ['[验收输入] 公园B', '113.30', '23.12'],

@@ -148,7 +148,10 @@ def test_local_timeline_never_claims_provider_timing(audit):
 def test_repeated_interrupted_run_becomes_observable_failure(audit):
     """A deterministic aged record models a process dying after its initial DB commit."""
     payload = RunCreate.model_validate(request_body())
-    snapshot = payload.model_dump(mode="json")
+    # Historical runs omitted the optional POI selection field.
+    snapshot = payload.model_dump(
+        mode="json", exclude={"selected_pois", "chat_message", "previous_run_id", "guide_references"},
+    )
     old = datetime.now(UTC) - timedelta(days=1)
     with audit.sessions.begin() as db:
         row = AgentRun(

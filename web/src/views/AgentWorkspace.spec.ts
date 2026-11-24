@@ -5,6 +5,8 @@ import AgentRouteMap from '../components/AgentRouteMap.vue'
 import { PRACTICE_MARKER } from '../content/plannerPractice'
 import * as api from '../api/agent'
 import type { AgentRun } from '../api/agent'
+import { searchAttractions } from '../api/poi'
+import type { PoiSearchResult } from '../types'
 
 vi.mock('../api/agent', () => ({
   getAgentCapabilities: vi.fn(),
@@ -15,6 +17,7 @@ vi.mock('../api/agent', () => ({
   previewAgentConfirmation: vi.fn(),
   confirmAgentRun: vi.fn(),
 }))
+vi.mock('../api/poi', () => ({ searchAttractions: vi.fn() }))
 const fixture = (): AgentRun => ({
   id: 'test-run',
   kind: 'plan',
@@ -101,6 +104,40 @@ beforeEach(() => {
   vi.mocked(api.createAgentRun).mockResolvedValue(fixture())
 })
 describe('小曦工作流交互边界（明确测试替身）', () => {
+  it('按城市搜索并选择高德地点，使用地点 ID 生成草案', async () => {
+    vi.mocked(api.getAgentCapabilities).mockResolvedValue({
+      amap_configured: true,
+      model_configured: false,
+      intent_default: 'local_rules',
+      privacy_notice: '',
+      limits: {},
+      tools: [],
+    })
+    vi.mocked(searchAttractions).mockResolvedValue({
+      items: [{ id: 'POI-TEST', name: '测试动物园', address: '测试街道' }],
+    } as PoiSearchResult)
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+    expect(wrapper.find('.manual-coordinate-entry').attributes('open')).toBeUndefined()
+    await wrapper.find('input[type=search]').setValue('测试动物园')
+    await button(wrapper, '搜索高德').trigger('click')
+    await flushPromises()
+    expect(searchAttractions).toHaveBeenCalledWith(expect.objectContaining({
+      keywords: '测试动物园', city_adcode: '440100',
+    }))
+    await wrapper.find('button[aria-label="加入测试动物园"]').trigger('click')
+    expect(wrapper.find('[aria-label="已选必去地点"]').text()).toContain('测试动物园')
+    expect(button(wrapper, '用高德生成行程').exists()).toBe(true)
+    await wrapper.find('form.travel-brief').trigger('submit')
+    await flushPromises()
+    expect(api.createAgentRun).toHaveBeenCalledWith(expect.objectContaining({
+      goal: '广州市 2 日游',
+      candidates: [],
+      selected_pois: [{ id: 'POI-TEST', name: '测试动物园' }],
+      allow_external: true,
+    }))
+  })
+
   it('直达历史任务只读取并恢复原输入，授权默认关闭，不自动执行或确认', async () => {
     const run = {
       ...fixture(),
@@ -158,7 +195,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
   it('默认不授权外部工具，条件草案须先预览再主动勾选才能保存', async () => {
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
-    await wrapper.find('textarea').setValue('测试两天的轻松行程')
+    await wrapper.find('.travel-brief textarea').setValue('测试两天的轻松行程')
     await wrapper.find('form.travel-brief').trigger('submit')
     await flushPromises()
     expect(api.createAgentRun).toHaveBeenCalledWith(
@@ -208,7 +245,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
       .mockResolvedValueOnce(fixture())
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
-    await wrapper.find('textarea').setValue('测试请求重试')
+    await wrapper.find('.travel-brief textarea').setValue('测试请求重试')
     await wrapper.find('form.travel-brief').trigger('submit')
     await flushPromises()
     const first = vi.mocked(api.createAgentRun).mock.calls[0]![0]
@@ -232,7 +269,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     vi.mocked(api.createAgentRun).mockResolvedValue(story)
     const wrapper = mount(AgentWorkspace, { props: { initialKind: 'story' } })
     await flushPromises()
-    await wrapper.find('textarea').setValue('整理测试回忆')
+    await wrapper.find('.travel-brief textarea').setValue('整理测试回忆')
     await wrapper.find('form.travel-brief').trigger('submit')
     await flushPromises()
     expect(api.createAgentRun).not.toHaveBeenCalled()
@@ -275,7 +312,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     vi.mocked(api.createAgentRun).mockResolvedValue(missing)
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
-    await wrapper.find('textarea').setValue('测试没有候选')
+    await wrapper.find('.travel-brief textarea').setValue('测试没有候选')
     await wrapper.find('form.travel-brief').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('信息不足')
@@ -291,7 +328,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     } as AgentRun)
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
-    await wrapper.find('textarea').setValue('检查中断恢复')
+    await wrapper.find('.travel-brief textarea').setValue('检查中断恢复')
     await wrapper.find('form.travel-brief').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('任务正在执行')
@@ -305,7 +342,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     vi.mocked(api.editAgentDraft).mockResolvedValue({ ...first, revision: 2 })
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
-    await wrapper.find('textarea').setValue('测试连续排除')
+    await wrapper.find('.travel-brief textarea').setValue('测试连续排除')
     await wrapper.find('form.travel-brief').trigger('submit')
     await flushPromises()
     await wrapper.find('[aria-label="从草案移除夹具地点"]').trigger('click')
@@ -320,7 +357,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
   it('点选兴趣遵守最多三项，取消后可换选并提交真实表单值', async () => {
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
-    await wrapper.find('textarea').setValue('测试兴趣与表单条件')
+    await wrapper.find('.travel-brief textarea').setValue('测试兴趣与表单条件')
     const interests = wrapper.find('[aria-label="旅行兴趣"]')
     const option = (name: string) =>
       interests.findAll('button').find((b) => b.text() === name)!
@@ -357,7 +394,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     vi.mocked(api.createAgentRun).mockResolvedValue(value)
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
-    await wrapper.find('textarea').setValue('测试按天查看与地图切换')
+    await wrapper.find('.travel-brief textarea').setValue('测试按天查看与地图切换')
     await wrapper.find('form.travel-brief').trigger('submit')
     await flushPromises()
     await wrapper.find('#map-tab').trigger('click')
@@ -467,7 +504,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     )
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
-    await wrapper.find('textarea').setValue('测试等待中的真实边界')
+    await wrapper.find('.travel-brief textarea').setValue('测试等待中的真实边界')
     await wrapper.find('form.travel-brief').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('正在等待本次任务结果')
@@ -501,7 +538,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     vi.mocked(api.createAgentRun).mockResolvedValue(value)
     const wrapper = mount(AgentWorkspace, { attachTo: document.body })
     await flushPromises()
-    await wrapper.find('textarea').setValue('测试同屏与站点联动')
+    await wrapper.find('.travel-brief textarea').setValue('测试同屏与站点联动')
     await wrapper.find('form.travel-brief').trigger('submit')
     await flushPromises()
     expect(wrapper.find('.plan-panels.is-split').exists()).toBe(true)
@@ -553,7 +590,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     vi.mocked(api.editAgentDraft).mockResolvedValue(updated)
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
-    await wrapper.find('textarea').setValue('测试移除选中站点')
+    await wrapper.find('.travel-brief textarea').setValue('测试移除选中站点')
     await wrapper.find('form.travel-brief').trigger('submit')
     await flushPromises()
     await wrapper.find('.stop-dot').trigger('click')
@@ -569,7 +606,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
   it('演练入口只填写虚拟条件、不自动创建任务，并能恢复原输入', async () => {
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
-    await wrapper.find('textarea').setValue('我自己原来填写的计划')
+    await wrapper.find('.travel-brief textarea').setValue('我自己原来填写的计划')
     await wrapper.find('[aria-label="目的地"]').setValue('330100')
     await wrapper.find('[aria-label="景点预算 / 元"]').setValue(180)
     await wrapper.find('.permission-card input[type=checkbox]').setValue(true)
@@ -590,7 +627,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     ).toBeDefined()
     await button(wrapper, '恢复我之前的输入').trigger('click')
     await flushPromises()
-    expect(wrapper.find<HTMLTextAreaElement>('textarea').element.value).toBe(
+    expect(wrapper.find<HTMLTextAreaElement>('.travel-brief textarea').element.value).toBe(
       '我自己原来填写的计划',
     )
     expect(

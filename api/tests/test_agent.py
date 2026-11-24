@@ -4,7 +4,7 @@ import copy
 import uuid
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
+from app.agent.guide_stays import parse_visit_duration
 from app.agent.models import AgentRun, SavedArtifact
 from app.config import settings
 from app.database import Base, get_db
@@ -65,6 +66,10 @@ class ExplicitMapStub(AMapClient):
                 distance_meters=2000, duration_seconds=0 if self.invalid_duration else 600, steps=()
             )
         ], None
+
+    def get_poi_detail(self, poi_id):
+        items, _ = self.search_pois()
+        return next(poi for poi in items if poi.id == poi_id)
 
 
 @dataclass
@@ -301,6 +306,161 @@ def test_explicit_map_stub_retry_success_is_traced_but_not_full_trip_validated(c
     assert run["result"]["validation"]["unknown_cost_count"] > 0
 
 
+def test_map_planning_accepts_poi_selection_without_user_coordinates(ctx):
+    ctx.provider.key = "explicit-test-only"
+    run = create(
+        ctx,
+        candidates=[],
+        allow_external=True,
+        selected_pois=[{"id": "TEST2", "name": "客户端显示名"}],
+    )
+    assert run["status"] == "awaiting_confirmation"
+    selected = next(c for c in run["result"]["candidates"] if c["id"] == "amap:TEST2")
+    assert selected["name"] == "测试地点2"
+    assert selected["verification"] == "verified"
+    assert selected["must_visit"] is True
+    assert any(e["tool"] == "amap.get_poi_detail" for e in run["events"])
+    assert any(
+        (e["details"].get("topics") or [])[:1] == ["风景名胜"]
+        for e in run["events"] if "details" in e
+    )
+    assert any(
+        s["candidate_id"] == selected["id"]
+        for day in run["result"]["days"] for s in day["stops"]
+    )
+
+
+def test_natural_language_plan_and_followup_share_conditions_and_city_guide(ctx):
+    ctx.provider.key = "explicit-test-only"
+    first = create(
+        ctx, candidates=[], allow_external=True,
+        chat_message="广州两天，每天三个景点，坐地铁",
+    )
+    assert first["request"]["stops_per_day"] == 3
+    assert first["request"]["transport"] == "transit"
+    assert first["result"]["city_guide"]["title"] == "广州市旅行指南"
+    assert first["result"]["intent_source"] == "local_rules"
+    second = create(
+        ctx, candidates=[], allow_external=True,
+        previous_run_id=first["id"], chat_message="每天一个景点，下午五点结束",
+    )
+    request = second["request"]
+    assert (request["days"], request["stops_per_day"], request["daily_end"]) == (2, 1, "17:00")
+    assert request["transport"] == "transit"
+    assert [len(day["stops"]) for day in second["result"]["days"]] == [1, 1]
+    assert [turn["role"] for turn in second["result"]["chat"]] == ["user", "assistant", "user", "assistant"]
+    assert second["saved_artifact_id"] is None
+
+
+def test_chat_uses_structured_model_fields_only_when_authorized(ctx, monkeypatch):
+    from app.agent.travel_chat import TravelTurn
+
+    ctx.provider.key = "explicit-test-only"
+    calls = []
+
+    def fake_model(message, context):
+        calls.append((message, context))
+        return TravelTurn(stops_per_day=1, transport="walking", interests=["美术馆"], rest_minutes=45)
+
+    monkeypatch.setattr("app.agent.travel_chat.model_turn", fake_model)
+    create(ctx, candidates=[], allow_external=True, chat_message="想看看广州")
+    assert not calls
+    plan = create(
+        ctx, candidates=[], allow_external=True, allow_model=True, chat_message="想看看广州，每天一个景点",
+    )
+    assert len(calls) == 1
+    assert set(calls[0][1]) <= {*TravelTurn.model_fields, "start_date"}
+    assert plan["result"]["intent_source"] == "deepseek"
+    assert plan["request"]["stops_per_day"] == 1
+    assert plan["request"]["transport"] == "walking"
+    assert plan["request"]["rest_minutes"] == 45
+    assert [len(day["stops"]) for day in plan["result"]["days"]] == [1, 1]
+
+
+def test_sightseeing_excludes_services_and_merges_attraction_subareas(ctx, monkeypatch):
+    ctx.provider.key = "explicit-test-only"
+    sample = ctx.provider.search_pois()[0][0]
+    places = [
+        replace(sample, id="PARKING", name="广州塔地面停车场", typecode="150905"),
+        replace(sample, id="PLAZA", name="广州塔-东广场", typecode="110105"),
+        replace(sample, id="TICKET", name="广州塔西售票处", typecode="110000"),
+        replace(sample, id="MAIN", name="广州塔", typecode="110202"),
+        replace(sample, id="SUB", name="广州塔观景平台", typecode="110200"),
+        replace(sample, id="WEST", name="广州塔西", typecode="110200"),
+        replace(sample, id="MUSEUM", name="广东省博物馆", typecode="140100"),
+    ]
+    monkeypatch.setattr(ctx.provider, "search_pois", lambda **_: (places, len(places)))
+    query = ctx.client.post("/api/v1/agent/attractions/search", json={
+        "keywords": "广州塔", "city_adcode": "440100",
+    })
+    assert query.status_code == 200, query.text
+    expected = {"广州塔", "广东省博物馆"}
+    assert {poi["name"] for poi in query.json()["items"]} == expected
+    plan = create(ctx, candidates=[], allow_external=True, must_visit=["广州塔"])
+    assert {c["name"] for c in plan["result"]["candidates"]} == expected
+    assert plan["result"]["verification_status"] == "conditional"
+    assert next(c for c in plan["result"]["candidates"] if c["id"] == "amap:MAIN")["must_visit"]
+
+
+def test_automatic_stop_count_responds_to_time_and_travellers(ctx, monkeypatch):
+    ctx.provider.key = "explicit-test-only"
+    sample = ctx.provider.search_pois()[0][0]
+    places = [replace(sample, id=f"M{i}", name=f"测试博物馆{i}", typecode="140100")
+              for i in range(8)]
+    monkeypatch.setattr(ctx.provider, "search_pois", lambda **_: (places, len(places)))
+    full = create(ctx, candidates=[], allow_external=True,
+                  chat_message="广州一天，全天逛博物馆，想多逛")
+    short = create(ctx, candidates=[], allow_external=True,
+                   chat_message="广州一天，带老人，喜欢博物馆，下午两点前结束")
+    assert full["request"].get("stops_per_day") is None
+    assert short["request"].get("stops_per_day") is None
+    assert short["request"]["rest_minutes"] == 90
+    assert short["request"]["daily_end"] == "14:00"
+    full_stops = full["result"]["days"][0]["stops"]
+    short_stops = short["result"]["days"][0]["stops"]
+    assert len(full_stops) > len(short_stops) >= 1
+    assert short_stops[-1]["departure"] <= "14:00"
+
+
+def test_companion_chat_clarifies_campus_and_preserves_plan(ctx):
+    initial = create(ctx)
+    route = "/api/v1/agent/companion"
+    base = {"city_adcode": "440100", "plan_id": initial["id"]}
+    question = ctx.client.post(route, json={**base, "message": "然后我也想来中山大学参观参观"})
+    assert question.status_code == 200
+    reply = question.json()
+    assert len(reply["choices"]) == 3
+    assert not reply.get("planning_request")
+    selected = ctx.client.post(route, json={
+        **base, "message": "南校园", "history": [{"role": "assistant", "text": reply["text"]}],
+    }).json()
+    assert "想去中山大学广州校区南校园" == selected["planning_request"]
+    assert "预约" in selected["text"]
+    mood = ctx.client.post(route, json={**base, "message": "第一次一个人旅游有一点紧张"}).json()
+    assert "担心" in mood["text"]
+    assert not mood.get("planning_request")
+    attraction = ctx.client.post(route, json={**base, "message": "介绍一下广州塔"}).json()
+    assert attraction["sources"][0]["label"] == "广州塔官网"
+    with ctx.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(AgentRun)) == 1
+
+
+def test_companion_campus_is_an_explicit_visit_only(ctx, monkeypatch):
+    ctx.provider.key = "explicit-test-only"
+    sample = ctx.provider.search_pois()[0][0]
+    campus = replace(sample, id="CAMPUS", name="中山大学(广州校区南校园)", typecode="141201")
+    monkeypatch.setattr(ctx.provider, "search_pois", lambda **_: ([campus, sample], 2))
+    first = create(ctx, candidates=[], allow_external=True)
+    assert all(stop["name"] != campus.name for day in first["result"]["days"] for stop in day["stops"])
+    planned = create(
+        ctx, candidates=[], allow_external=True, chat_message="想去中山大学广州校区南校园",
+        previous_run_id=first["id"],
+    )
+    assert any(stop["name"] == campus.name for day in planned["result"]["days"] for stop in day["stops"])
+    assert "南校园" in planned["result"]["chat"][-1]["text"]
+    assert "预约" in planned["result"]["chat"][-1]["text"]
+
+
 def test_zero_time_and_nan_coordinates_never_pass_evidence_gate(ctx):
     ctx.provider.key = "explicit-test-only"
     ctx.provider.invalid_duration = True
@@ -343,6 +503,57 @@ def add_memory(ctx: Context, *, other=False, title="用户真实输入的测试�
                 )
             )
     return str(memory_id)
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("建议游玩 2–3 小时，地铁30分钟", (120, 180)),
+    ("游玩时间：一个半小时", (90, 90)),
+    ("1小时30分钟", (90, 90)),
+    ("建议停留 45 分钟至 1 小时", (45, 60)),
+    ("逛了两到三个小时", (120, 180)),
+    ("地铁需要 30 分钟，排队 1 小时。", None),
+])
+def test_guide_duration_requires_visit_context(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError, match="游玩时长"):
+            parse_visit_duration(text)
+    else:
+        assert parse_visit_duration(text) == expected
+
+
+def test_guide_references_update_timetable_and_keep_original_estimate(ctx):
+    path = "/api/v1/agent/runs"
+    existing = create(ctx, days=1, daily_end="21:00")
+    references = [
+        {"place_name": "用户提供地点0", "excerpt": "建议游玩 2–3 小时",
+         "source_url": "https://www.xiaohongshu.com/explore/test-fixture"},
+        {"place_name": "用户提供地点0", "excerpt": "停留90分钟"},
+        {"place_name": "无对应景点", "excerpt": "游玩半小时"},
+    ]
+    revision = ctx.client.patch(f"{path}/{existing['id']}/draft", json={
+        "expected_revision": existing["revision"], "guide_references": references,
+    })
+    assert revision.status_code == 200, revision.text
+    updated = revision.json()
+    stops = updated["result"]["days"][0]["stops"]
+    changed = next(stop for stop in stops if stop["name"] == "用户提供地点0")
+    assert changed["stay_minutes"] == 120
+    assert changed["stay_source"] == "guide_reference"
+    assert changed["stay_references"][0] == {
+        "from_minutes": 120, "to_minutes": 180,
+        "source": "小红书 · 用户提供摘录",
+        "source_url": "https://www.xiaohongshu.com/explore/test-fixture",
+    }
+    assert any("无对应景点" in warning for warning in updated["result"]["warnings"])
+    assert updated["saved_artifact_id"] is None
+    cleared = ctx.client.patch(f"{path}/{existing['id']}/draft", json={
+        "expected_revision": updated["revision"], "guide_references": [],
+    })
+    assert cleared.status_code == 200, cleared.text
+    stops = cleared.json()["result"]["days"][0]["stops"]
+    reverted = next(stop for stop in stops if stop["name"] == "用户提供地点0")
+    assert reverted["stay_minutes"] == 60
+    assert reverted["stay_references"] == []
 
 
 def test_story_requires_authorization_does_not_invent_sources_or_send_privacy(ctx):

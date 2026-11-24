@@ -312,7 +312,7 @@ onBeforeUnmount(() => {
         </section>
         <section v-else-if="!jobs.length" class="studio-start" aria-label="开始照片创作">
           <div class="studio-start-copy"><h2>选一张照片，留住旅途的光。</h2><p>从城市记忆中选择自己的照片，原片与创作分别保留。</p><details class="ui-disclosure"><summary>如何创作</summary><ol><li>打开一段记忆，添加自己的照片。</li><li>选择风格，核对处理范围后确认生成。</li><li>成功后可对比原片、收藏或下载作品。</li></ol><p>当前生成服务尚未连接时，不会创建成功作品。</p></details></div>
-          <figure class="studio-inspiration"><img src="/discover/xiamen-coast.webp" alt="厦门海岸创作灵感摄影，非个人作品或生成结果" /><figcaption><span class="studio-photo-label">创作灵感参考 · 非个人作品</span><a href="/discover/credits.html" target="_blank" rel="noopener">摄影来源 ↗</a></figcaption></figure>
+          <figure class="studio-inspiration"><img :src="'/discover/xiamen-coast.webp'" alt="厦门海岸创作灵感摄影，非个人作品或生成结果" /><figcaption><span class="studio-photo-label">创作灵感参考 · 非个人作品</span><a href="/discover/credits.html" target="_blank" rel="noopener">摄影来源 ↗</a></figcaption></figure>
         </section>
         <div v-else class="studio-workspace">
           <aside class="studio-history" aria-label="生成历史">

@@ -102,7 +102,7 @@ function exploreMood(id: TravelMood) {
       >
         <div class="hero-image-wrap" aria-hidden="true">
           <img
-            src="/discover/xiamen-hero.webp"
+            :src="'/discover/xiamen-hero.webp'"
             alt=""
             class="hero-image"
             fetchpriority="high"

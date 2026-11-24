@@ -21,68 +21,115 @@ def distance(a: dict, b: dict) -> float:
     return math.hypot(x, y)
 
 
-def group_candidates(candidates: list[dict], count: int, pace: str) -> list[list[dict]]:
+def group_candidates(
+    candidates: list[dict], count: int, pace: str, stops_per_day: int | None = None,
+    *, day_minutes: int | None = None,
+) -> list[list[dict]]:
     if not candidates:
         return [[] for _ in range(count)]
-    quota = 2 if pace == "relaxed" else 3
-    selected = sorted(candidates, key=lambda x: not x["must_visit"])[
-        : max(quota * count, sum(c["must_visit"] for c in candidates))
-    ]
+    quota = stops_per_day
+    if quota is None and day_minutes is None:
+        quota = 2 if pace == "relaxed" else 3
+    selected = sorted(candidates, key=lambda x: not x["must_visit"])
+    if quota is not None and day_minutes is None:
+        selected = selected[:max(quota * count, sum(c["must_visit"] for c in candidates))]
     # Farthest-first real candidate seeds, followed by capacity-aware nearest assignment.
     seeds = [selected[0]]
     while len(seeds) < min(count, len(selected)):
         remaining = [x for x in selected if x not in seeds]
         seeds.append(max(remaining, key=lambda x: min(distance(x, s) for s in seeds)))
     groups = [[s] for s in seeds] + [[] for _ in range(count - len(seeds))]
+    loads = [seed["stay_minutes"] for seed in seeds] if day_minutes is not None else []
     for candidate in selected:
         if candidate in seeds:
             continue
-        index = min(
-            range(len(seeds)),
-            key=lambda i: (
-                len(groups[i]) >= quota,
+        if day_minutes is None:
+            index = min(range(len(seeds)), key=lambda i: (
+                quota is not None and len(groups[i]) >= quota,
                 distance(candidate, seeds[i]) + len(groups[i]) * 0.02,
-            ),
-        )
+            ))
+        else:
+            index = min(range(len(seeds)), key=lambda i: (
+                quota is not None and len(groups[i]) >= quota,
+                max(0, loads[i] + candidate["stay_minutes"] + 30 - day_minutes),
+                distance(candidate, seeds[i]) + 0.00025 * loads[i],
+            ))
+            loads[index] += candidate["stay_minutes"] + 30
         groups[index].append(candidate)
     ordered = []
     for group in groups:
-        path = group[:1]
-        remaining = group[1:]
+        if not group:
+            ordered.append([])
+            continue
+        first = next((c for c in group if c["must_visit"]), group[0]) if day_minutes is not None else group[0]
+        path = [first]
+        remaining = [c for c in group if c is not first]
         while remaining:
-            nxt = min(remaining, key=lambda x: distance(path[-1], x))
+            nxt = min(remaining, key=lambda x: (
+                day_minutes is not None and not x["must_visit"], distance(path[-1], x),
+            ))
             path.append(nxt)
             remaining.remove(nxt)
         ordered.append(path)
     return ordered
 
 
+def flexible_sightseeing(request: dict) -> bool:
+    return bool(request.get("allow_external") and not request.get("candidates"))
+
+
+def usable_day_minutes(request: dict) -> int:
+    full_window = minutes(request["daily_end"]) - minutes(request["daily_start"])
+    rest = request.get("rest_minutes")
+    if rest is None:
+        rest = 60 if request["pace"] == "relaxed" else 30
+    return full_window - min(rest, full_window // 4)
+
+
+def groups_for_plan(request: dict, candidates: list[dict]) -> list[list[dict]]:
+    return group_candidates(
+        candidates, request["days"], request["pace"], request.get("stops_per_day"),
+        day_minutes=usable_day_minutes(request) if flexible_sightseeing(request) else None,
+    )
+
+
 def assemble_days(request: dict, groups: list[list[dict]], legs: list[dict]) -> list[dict]:
     edge_map = {(x["from_id"], x["to_id"]): x for x in legs}
     days = []
+    flexible = flexible_sightseeing(request)
+    latest = minutes(request["daily_start"]) + usable_day_minutes(request) if flexible else None
+    quota = request.get("stops_per_day")
     for index, group in enumerate(groups):
         now = minutes(request["daily_start"])
         stops, day_legs = [], []
         timing_known = True
-        for offset, candidate in enumerate(group):
-            if offset:
-                previous = group[offset - 1]
-                leg = edge_map.get((previous["id"], candidate["id"])) or {
-                    "from_id": previous["id"],
+        for candidate in group:
+            leg = None
+            arrival = now
+            if stops:
+                previous_id = stops[-1]["candidate_id"]
+                leg = edge_map.get((previous_id, candidate["id"])) or {
+                    "from_id": previous_id,
                     "to_id": candidate["id"],
                     "duration_minutes": None,
                     "distance_meters": None,
                     "source": "unknown",
                     "queried_at": None,
                 }
-                day_legs.append(leg)
-                if leg["duration_minutes"] is None:
-                    timing_known = False
-                now += leg["duration_minutes"] if leg["duration_minutes"] is not None else 30
+                arrival += leg["duration_minutes"] if leg["duration_minutes"] is not None else 30
             if candidate["opening_start"]:
-                now = max(now, minutes(candidate["opening_start"]))
-            arrival = now
-            now += candidate["stay_minutes"]
+                arrival = max(arrival, minutes(candidate["opening_start"]))
+            departure = arrival + candidate["stay_minutes"]
+            if latest is not None and not candidate["must_visit"]:
+                if quota is not None and len(stops) >= quota:
+                    continue
+                closes = minutes(candidate["opening_end"]) if candidate["opening_end"] else latest
+                if departure > min(closes, latest):
+                    continue
+            if leg is not None:
+                day_legs.append(leg)
+                timing_known &= leg["duration_minutes"] is not None
+            now = departure
             stops.append(
                 {
                     "candidate_id": candidate["id"],
@@ -92,9 +139,11 @@ def assemble_days(request: dict, groups: list[list[dict]], legs: list[dict]) -> 
                     "arrival": clock(arrival),
                     "departure": clock(now),
                     "stay_minutes": candidate["stay_minutes"],
+                    "stay_source": candidate.get("stay_source"),
+                    "stay_references": candidate.get("stay_references", []),
                     "timing_basis": (
                         "user_schedule"
-                        if offset == 0
+                        if not stops
                         else "provider"
                         if timing_known
                         else "planning_buffer"
@@ -136,6 +185,10 @@ def validate_plan(request: dict, candidates: list[dict], days: list[dict]) -> di
         all(minutes(d["end"]) <= minutes(request["daily_end"]) for d in days),
         "每日活动须在用户结束时间之前完成。",
     )
+    quota = request.get("stops_per_day")
+    if quota is not None:
+        check("daily_stop_limit", all(len(day["stops"]) <= quota for day in days),
+              f"每日景点最多 {quota} 个；如需保留更多必去地点，请增加天数或调整上限。")
     opening_ok = True
     time_ok = True
     for day in days:

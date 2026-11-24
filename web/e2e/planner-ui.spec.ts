@@ -51,8 +51,8 @@ test('规划：兴趣限制与信息不足恢复，不把未完成步骤或空�
   await page.screenshot({
     path: fileURLToPath(new URL(`missing-input-${testInfo.project.name}.png`, folder)),
   })
-  await page.getByRole('button', { name: '补充想去的地点', exact: true }).last().click()
+  await page.getByRole('button', { name: '搜索想去的地点', exact: true }).last().click()
   await expect(page.locator('.candidate-input')).toHaveAttribute('open', '')
-  await expect(page.getByRole('button', { name: '添加地点', exact: true })).toBeVisible()
+  await expect(page.getByRole('searchbox', { name: '搜索想去的地点' })).toBeVisible()
   expect(errors).toEqual([])
 })

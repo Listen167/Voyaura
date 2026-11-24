@@ -28,7 +28,6 @@ import {
   previewMediaUpload,
   previewImageJob,
   previewManualCheckIn,
-  previewXiaoxiPlanning,
   previewMediaDelete,
   searchPois,
   uploadMediaFile,
@@ -79,7 +78,6 @@ import type {
   PoiSearchDraft,
   PoiSearchResult,
   VisitedCity,
-  XiaoxiPlanningPreview,
 } from './types'
 import EmptyView from './views/EmptyView.vue'
 import ImageStudioView from './views/ImageStudioView.vue'
@@ -310,6 +308,7 @@ function selectView(view: AppView) {
     return
   }
   activeView.value = view
+  selectedCity.value = null
 }
 
 function startDiscoveryPlan(intent: DiscoveryIntent) {
@@ -680,12 +679,6 @@ function openXiaoxi() {
   selectView('journeys')
 }
 
-function selectAppView(view: AppView) {
-  activeView.value = view
-  xiaoxiOpen.value = false
-  selectedCity.value = null
-}
-
 function askXiaoxiAboutCity(city: VisitedCity) {
   const latestDate = cityMemoryDetail.value?.memories[0]?.occurred_at.slice(
     0,
@@ -705,37 +698,6 @@ function openStoryWorkspace(cityAdcode = agentCity.value, startDate?: string) {
       ...(startDate ? { date: startDate } : {}),
     },
   })
-}
-
-async function submitXiaoxiMessage() {
-  const message = composer.value.trim()
-  if (!message || xiaoxiPhase.value === 'loading') return
-  xiaoxiEntries.value.push({ id: crypto.randomUUID(), role: 'user', text: message })
-  composer.value = ''
-  xiaoxiPhase.value = 'loading'
-  xiaoxiError.value = null
-  const transcript = xiaoxiEntries.value
-    .filter(entry => entry.role === 'user')
-    .slice(-6)
-    .map((entry, index) => `第 ${index + 1} 次补充：${entry.text}`)
-    .join('\n')
-    .slice(-2_000)
-  try {
-    const preview = await previewXiaoxiPlanning({
-      username: 'AuroraRovella',
-      message: transcript,
-    })
-    xiaoxiEntries.value.push({
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      text: preview.assistant_message,
-      preview,
-    })
-    xiaoxiPhase.value = 'idle'
-  } catch (error) {
-    xiaoxiError.value = normalizeError(error)
-    xiaoxiPhase.value = 'error'
-  }
 }
 
 function openMemoryComposer(city: VisitedCity) {

@@ -10,17 +10,26 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.agent.guide_stays import apply_stay_guides
 from app.agent.models import AgentRun, SavedArtifact
-from app.agent.planner import assemble_days, group_candidates, validate_plan
+from app.agent.planner import (
+    assemble_days,
+    flexible_sightseeing,
+    groups_for_plan,
+    validate_plan,
+)
 from app.agent.schemas import ConfirmRequest, DraftEdit, RunCreate, RunOut
 from app.agent.tools import (
+    SUPPORT_FACILITY,
     AgentSettings,
     ToolTrace,
     collect_candidates,
     collect_legs,
     local_intent,
+    match_attraction,
     model_intent,
 )
+from app.agent.travel_chat import CITY_GUIDES, city_guide, resolve_turn
 from app.errors import AppError
 from app.integrations.amap import AMapClient
 from app.models import City, CityMemory, MediaAsset, User
@@ -191,17 +200,23 @@ def out(db: Session, run: AgentRun) -> RunOut:
 
 def build_plan(request: dict, candidates: list[dict], evidence_legs: list[dict]) -> dict:
     excluded = request.get("excluded_candidate_ids", [])
-    active = [c for c in candidates if c["id"] not in excluded]
-    groups = group_candidates(active, request["days"], request["pace"])
+    active = [
+        c for c in candidates if c["id"] not in excluded
+        and (c["source"] != "amap" or not SUPPORT_FACILITY.search(c["name"]))
+    ]
+    active, unmatched_guides = apply_stay_guides(request, active)
+    groups = groups_for_plan(request, active)
     days = assemble_days(request, groups, evidence_legs)
     validation = validate_plan(request, active, days)
     warnings = ["本版为城市日间活动草案；不包含机票、酒店、餐饮、预约与返程，不提供全局最优保证。"]
     if any(c["stay_source"] == "planning_assumption" for c in active):
-        warnings.append("景点停留时长为可解释的规划假设，非地图事实。")
+        warnings.append("缺少攻略的景点按类别与旅行节奏估算停留时长。")
+    if unmatched_guides:
+        warnings.append("攻略未匹配到唯一景点，请核对日程内的正式名称：" + "、".join(unmatched_guides))
     if validation["unplaced_candidates"]:
         warnings.append("为保留旅行节奏，未安排：" + "、".join(validation["unplaced_candidates"]))
     for required in request["must_visit"]:
-        matches = [c for c in active if required in c["name"]]
+        matches = match_attraction(required, active)
         passed = len(matches) == 1 and any(
             s["candidate_id"] == matches[0]["id"] for d in days for s in d["stops"]
         )
@@ -214,6 +229,18 @@ def build_plan(request: dict, candidates: list[dict], evidence_legs: list[dict])
         )
         if not passed and active:
             validation["verification_status"] = "conflict"
+    visited_ids = {stop["candidate_id"] for day in days for stop in day["stops"]}
+    for poi in request.get("selected_pois", []):
+        if f"amap:{poi['id']}" not in visited_ids:
+            validation["checks"].append(
+                {
+                    "code": "selected_poi_unavailable",
+                    "status": "fail",
+                    "message": f"未能核实或安排已选地点“{poi['name']}”，请重查地点或调整游玩时间。",
+                }
+            )
+            if active:
+                validation["verification_status"] = "conflict"
     status = validation.pop("verification_status")
     unknowns = validation.pop("unknowns")
     return {
@@ -222,7 +249,7 @@ def build_plan(request: dict, candidates: list[dict], evidence_legs: list[dict])
         "summary": (
             f"已生成{request['days']}天城市活动草案，待核实开放、费用及完整交通条件。"
             if active
-            else "没有可用候选地点。请提供地点，或配置并授权地图服务。"
+            else "本次没有查到可用地点。可以搜索具体地名，或先试用离线演练。"
         ),
         "warnings": warnings,
         "unknowns": unknowns,
@@ -240,9 +267,39 @@ def build_plan(request: dict, candidates: list[dict], evidence_legs: list[dict])
                 "pace",
                 "must_visit",
             )
+        } | {
+            "stops_per_day": request.get("stops_per_day"),
+            "adaptive": flexible_sightseeing(request),
         },
         "evidence_legs": evidence_legs,
     }
+
+
+def describe_chat_plan(result: dict, request: dict) -> str:
+    stops = [(day["day"], stop) for day in result["days"] for stop in day["stops"]]
+    required = request["must_visit"]
+    if required:
+        details = []
+        scheduled = [stop for _, stop in stops]
+        for name in required:
+            matches = match_attraction(name, scheduled)
+            match = next(((day, stop) for day, stop in stops if stop in matches), None) if len(matches) == 1 else None
+            if match:
+                day, stop = match
+                details.append(f"把{stop['name']}放到第 {day} 天 {stop['arrival']} 了。")
+                if "大学" in name and ("校园" in name or "校区" in name):
+                    details.append("访客开放和预约记得在出发前看一下学校通知。")
+            else:
+                details.append(f"这次还没能把{name}排进去。可以先核对地点名称，再试一个宽松点的时段。")
+        if result["verification_status"] == "conflict":
+            details.append("草案里还有条件需要确认，先看看安排再决定。")
+        return "".join(details)
+    if not stops:
+        return "这次还没有查到能排进路线的地点。你愿意换一个主题，还是先挑一个一定想去的地方？"
+    per_day = "、".join(str(len(day["stops"])) for day in result["days"])
+    if limit := request.get("stops_per_day"):
+        return f"我按每天最多 {limit} 站重新排了，各天是 {per_day} 站，你看节奏合不合适。"
+    return f"我试着把近一点的地方放在同一天，各天排了 {per_day} 站。每天 {request['daily_end']} 前收尾，你想再松一点也可以。"
 
 
 def build_story(db: Session, actor: User, request: dict, trace: ToolTrace) -> dict:
@@ -328,6 +385,11 @@ def build_story(db: Session, actor: User, request: dict, trace: ToolTrace) -> di
 
 def create_run(db: Session, actor: User, payload: RunCreate, client: AMapClient) -> AgentRun:
     request = payload.model_dump(mode="json")
+    for optional in ("selected_pois", "chat_message", "previous_run_id"):
+        if not request[optional]:
+            del request[optional]
+    if request["guide_references"] is None:
+        del request["guide_references"]
     input_hash = digest(request)
     existing = db.scalar(
         select(AgentRun).where(
@@ -342,6 +404,9 @@ def create_run(db: Session, actor: User, payload: RunCreate, client: AMapClient)
             )
         recover_run(db, existing)
         return existing
+    previous = get_run(db, actor, payload.previous_run_id) if payload.previous_run_id else None
+    if previous and (previous.kind != "plan" or previous.status not in ("awaiting_confirmation", "confirmed", "needs_input")):
+        raise AppError("TRAVEL_CHAT_DRAFT_UNAVAILABLE", "当前任务还不能继续调整。", status_code=409)
     run = AgentRun(
         user_id=actor.id,
         client_request_id=payload.client_request_id,
@@ -375,8 +440,36 @@ def create_run(db: Session, actor: User, payload: RunCreate, client: AMapClient)
         if payload.kind == "story":
             result = build_story(db, actor, request, trace)
         else:
-            topics = local_intent(request)
             intent_source = "local_rules"
+            knowledge = None
+            if payload.chat_message:
+                if previous:
+                    fields = (
+                        "city_adcode", "city_name", "start_date", "days", "daily_start", "daily_end",
+                        "budget_yuan", "transport", "pace", "interests", "must_visit",
+                        "candidates", "stops_per_day", "rest_minutes", "avoid_places",
+                    )
+                    request.update({key: previous.request_snapshot[key] for key in fields
+                                    if key in previous.request_snapshot})
+                    if payload.allow_external and previous.request_snapshot.get("selected_pois"):
+                        request["selected_pois"] = previous.request_snapshot["selected_pois"]
+                    if "guide_references" not in request and request["city_adcode"] == previous.request_snapshot.get("city_adcode"):
+                        request["guide_references"] = previous.request_snapshot.get("guide_references", [])
+                cities = {key: data[0] for key, data in CITY_GUIDES.items()}
+                cities.update({code: name for code, name in db.execute(select(City.adcode, City.name_zh))})
+                intent_source = resolve_turn(request, cities, trace)
+                avoided = request.get("avoid_places", [])
+                for key in ("must_visit", "selected_pois", "candidates"):
+                    request[key] = [
+                        value for value in request.get(key, [])
+                        if not any(word in (value if isinstance(value, str) else value["name"]) for word in avoided)
+                    ]
+            knowledge = city_guide(request["city_adcode"]) if payload.allow_external or payload.chat_message else None
+            if knowledge:
+                trace.add("knowledge", "city_guide.lookup", "succeeded", "已读取本地城市指南。")
+            topics = local_intent(request)
+            if knowledge and topics == ["风景名胜"]:
+                topics = [*topics, *knowledge["topics"][:2]]
             trace.add(
                 "intent",
                 "local_rules",
@@ -384,13 +477,20 @@ def create_run(db: Session, actor: User, payload: RunCreate, client: AMapClient)
                 "使用有限关键词规则，显式表单约束优先。",
                 details={"topics": topics},
             )
-            if payload.allow_model:
+            if payload.allow_model and not payload.chat_message:
                 generated = model_intent(request, trace, AgentSettings())
                 if generated is not None:
                     topics = list(dict.fromkeys(request["must_visit"] + generated))[:3]
                     intent_source = "deepseek"
             candidates = collect_candidates(request, client, trace, topics)
-            groups = group_candidates(candidates, payload.days, payload.pace)
+            scheduled, unmatched = apply_stay_guides(request, candidates)
+            if request.get("guide_references"):
+                trace.add(
+                    "evidence", "guide_stay.apply", "succeeded", "已把匹配的攻略时长纳入排程。",
+                    details={"matched_places": sum(c["stay_source"] == "guide_reference" for c in scheduled),
+                             "unmatched_places": unmatched},
+                )
+            groups = groups_for_plan(request, scheduled)
             legs = collect_legs(request, groups, client, trace)
             trace.add(
                 "optimization",
@@ -400,6 +500,12 @@ def create_run(db: Session, actor: User, payload: RunCreate, client: AMapClient)
             )
             result = build_plan(request, candidates, legs)
             result["intent_source"] = intent_source
+            if payload.chat_message:
+                earlier = previous.result_snapshot.get("chat", []) if previous else []
+                reply = describe_chat_plan(result, request)
+                result["chat"] = [*earlier[-10:], {"role": "user", "text": payload.chat_message},
+                                  {"role": "assistant", "text": reply}]
+                result["city_guide"] = knowledge
             trace.add(
                 "validation",
                 "independent_validator",
@@ -443,6 +549,8 @@ def create_run(db: Session, actor: User, payload: RunCreate, client: AMapClient)
             AgentRun.status == "running",
         )
         .values(
+            request_snapshot=request,
+            title=f"{request['city_name']} · 旅行计划" if payload.chat_message else run.title,
             result_snapshot=result, events=trace.events, status=status, updated_at=datetime.now(UTC)
         )
         .execution_options(synchronize_session=False)
@@ -467,7 +575,7 @@ def edit_run(db: Session, actor: User, run_id: uuid.UUID, edit: DraftEdit) -> Ag
         raise AppError("AGENT_REVISION_CONFLICT", "草稿已被修改，请刷新。", status_code=409)
     request, result = copy.deepcopy(run.request_snapshot), copy.deepcopy(run.result_snapshot)
     if run.kind == "story":
-        if edit.excluded_candidate_ids is not None or edit.daily_end is not None:
+        if edit.excluded_candidate_ids is not None or edit.daily_end is not None or edit.guide_references is not None:
             raise AppError("AGENT_WRONG_EDIT_KIND", "故事仅支持标题与正文编辑。", status_code=422)
         if not result.get("source_memories"):
             raise AppError(
@@ -492,8 +600,13 @@ def edit_run(db: Session, actor: User, run_id: uuid.UUID, edit: DraftEdit) -> Ag
                     "AGENT_INVALID_WINDOW", "结束时间必须晚于开始时间。", status_code=422
                 )
             request["daily_end"] = edit.daily_end
+        if edit.guide_references is not None:
+            request["guide_references"] = [ref.model_dump(mode="json") for ref in edit.guide_references]
         result = build_plan(request, result.get("candidates", []), result.get("evidence_legs", []))
         result["intent_source"] = run.result_snapshot.get("intent_source", "local_rules")
+        for key in ("chat", "city_guide"):
+            if key in run.result_snapshot:
+                result[key] = run.result_snapshot[key]
     title = edit.title if edit.title is not None else run.title
     new_status = (
         "needs_input"
@@ -507,7 +620,8 @@ def edit_run(db: Session, actor: User, run_id: uuid.UUID, edit: DraftEdit) -> Ag
             "stage": "revision",
             "tool": "draft.edit",
             "status": "succeeded",
-            "message": "用户修改草案，旧确认已失效。",
+            "message": "已按攻略建议重排行程，旧确认已失效。" if edit.guide_references is not None
+            else "用户修改草案，旧确认已失效。",
             "attempt": 1,
         }
     ]

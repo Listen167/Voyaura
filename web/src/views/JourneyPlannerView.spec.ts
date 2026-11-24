@@ -84,7 +84,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('JourneyPlannerView', () => {
   it('builds a truthful planning draft before AMap verification', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith('/tools/routes/capabilities')) return jsonResponse(capabilities)
       if (url.endsWith('/xiaoxi/planning/capability')) return jsonResponse(planningCapability)
@@ -107,10 +107,12 @@ describe('JourneyPlannerView', () => {
     expect(wrapper.text()).toContain('待核验')
     expect(wrapper.text()).toContain('区域尚未分配')
     expect(wrapper.findAll('.planning-day-list article')).toHaveLength(3)
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8001/api/v1/xiaoxi/planning/preview',
-      expect.objectContaining({ method: 'POST' }),
-    )
+    expect(
+      fetchMock.mock.calls.some(([url, init]) =>
+        new URL(String(url), 'http://local.test').pathname === '/api/v1/xiaoxi/planning/preview' &&
+        init?.method === 'POST',
+      ),
+    ).toBe(true)
   })
 
   it('keeps licensed intercity providers and the sourced local route tool', async () => {
@@ -128,7 +130,7 @@ describe('JourneyPlannerView', () => {
         }],
       }],
     }
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith('/tools/routes/capabilities')) return jsonResponse(capabilities)
       if (url.endsWith('/xiaoxi/planning/capability')) return jsonResponse(planningCapability)
@@ -145,11 +147,15 @@ describe('JourneyPlannerView', () => {
     await wrapper.get('.route-query-form').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      '/api/v1/tools/routes/plan',
-      expect.objectContaining({ method: 'POST' }),
+    const routeCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith('/tools/routes/plan'),
     )
+    expect(routeCall).toBeDefined()
+    const [routeUrl, routeInit] = routeCall!
+    expect(new URL(String(routeUrl), 'http://local.test').pathname).toBe(
+      '/api/v1/tools/routes/plan',
+    )
+    expect(routeInit).toEqual(expect.objectContaining({ method: 'POST' }))
     expect(wrapper.text()).toContain('20 小时')
     expect(wrapper.text()).toContain('1600.0 公里')
     expect(wrapper.text()).toContain('¥620')

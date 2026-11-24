@@ -27,8 +27,11 @@ import {
   SlidersHorizontal,
   CircleAlert,
   ArrowUpRight,
+  MessageCircle,
 } from 'lucide-vue-next'
 import { ApiClientError } from '../api/client'
+import { searchAttractions } from '../api/poi'
+import type { PoiItem } from '../types'
 import {
   confirmAgentRun,
   createAgentRun,
@@ -37,12 +40,17 @@ import {
   getAgentRun,
   listAgentRuns,
   previewAgentConfirmation,
+  sendCompanionMessage,
 } from '../api/agent'
 import type {
   AgentCapabilities,
   AgentRun,
   Confirmation,
+  CompanionMessage,
+  CompanionReply,
+  GuideReference,
   RunCreate,
+  SelectedPoi,
   UserCandidate,
 } from '../api/agent'
 import AgentRouteMap from '../components/AgentRouteMap.vue'
@@ -117,6 +125,12 @@ const mustVisit = ref('')
 const allowExternal = ref(false)
 const allowModel = ref(false)
 const allowMemory = ref(false)
+const chatMessage = ref('')
+const companionMessages = ref<CompanionMessage[]>([])
+const companionReply = ref<CompanionReply | null>(null)
+const companionBusy = ref(false)
+const companionError = ref('')
+const chatModel = ref(false)
 const candidates = ref<
   Array<
     Omit<UserCandidate, 'longitude' | 'latitude'> & {
@@ -125,13 +139,32 @@ const candidates = ref<
     }
   >
 >([])
+const selectedPois = ref<SelectedPoi[]>([])
+const guideReferences = ref<GuideReference[]>([])
+const guidePanel = ref<HTMLDetailsElement | null>(null)
+const guideName = ref('')
+const guideExcerpt = ref('')
+const guideUrl = ref('')
+const guideError = ref('')
+const displayedChat = computed<CompanionMessage[]>(() =>
+  companionMessages.value.length ? companionMessages.value : (run.value?.result.chat ?? []),
+)
+const guidesNeedApply = computed(() =>
+  !!run.value && JSON.stringify(guideReferences.value) !== JSON.stringify(run.value.request.guide_references ?? []),
+)
+const poiQuery = ref('')
+const poiResults = ref<PoiItem[]>([])
+const poiMessage = ref('')
+const poiSearching = ref(false)
+let poiSearchVersion = 0
+const atPlaceLimit = computed(() => candidates.value.length + selectedPois.value.length >= 12)
 const capabilities = ref<AgentCapabilities | null>(null)
 const capabilitiesUnavailable = ref(false)
 const mapAvailabilityNote = computed(() =>
   capabilities.value
     ? capabilities.value.amap_configured
       ? ''
-      : '当前服务尚未配置地图查询，可补充已知地点。'
+      : '高德查询暂未连接。你可以先试用离线演练。'
     : capabilitiesUnavailable.value
       ? '暂时无法读取服务状态，工具可用性以实际执行结果为准。'
       : '正在读取工具服务状态。',
@@ -154,6 +187,7 @@ const resultAnchor = ref<HTMLElement | null>(null)
 const briefAnchor = ref<HTMLElement | null>(null)
 const confirmationAnchor = ref<HTMLElement | null>(null)
 const candidateDetails = ref<HTMLDetailsElement | null>(null)
+const travelChatInput = ref<HTMLTextAreaElement | null>(null)
 const editingBrief = ref(false)
 const resultTab = ref<'schedule' | 'map' | 'execution'>('schedule')
 const practiceBackup = ref<ReturnType<typeof captureBrief> | null>(null)
@@ -176,22 +210,20 @@ const hasLocalPlace = computed(() =>
       Number.isFinite(Number(c.latitude)),
   ),
 )
+const planWithMap = computed(() =>
+  mode.value === 'plan' &&
+  !inputPractice.value &&
+  (allowExternal.value ||
+    selectedPois.value.length > 0 ||
+    (capabilities.value?.amap_configured && !hasLocalPlace.value)),
+)
 const needsPlaceSource = computed(
   () =>
     mode.value === 'plan' &&
     !hasPlan.value &&
     !inputPractice.value &&
     !hasLocalPlace.value &&
-    (!capabilities.value?.amap_configured || !allowExternal.value),
-)
-const placeSourceExplanation = computed(() =>
-  capabilities.value
-    ? capabilities.value.amap_configured
-      ? '目前还没有候选地点，也尚未授权在线查询。请补充自己的地点，或在下方允许查询高德。'
-      : '当前尚未连接在线地点查询。只填写目的地和旅行想法，还不能生成具体站点；勾选查询授权也不会自动接通服务。'
-    : capabilitiesUnavailable.value
-      ? '暂时无法确认地点服务状态。你可以补充地点，或先用离线演练体验完整流程。'
-      : '正在读取地点服务状态。你也可以先用离线演练体验完整流程。',
+    !planWithMap.value,
 )
 function captureBrief() {
   return {
@@ -209,6 +241,8 @@ function captureBrief() {
     allowExternal: allowExternal.value,
     allowModel: allowModel.value,
     candidates: candidates.value.map((c) => ({ ...c })),
+    selectedPois: selectedPois.value.map((poi) => ({ ...poi })),
+    guideReferences: guideReferences.value.map((guide) => ({ ...guide })),
   }
 }
 function briefFingerprint() {
@@ -233,7 +267,11 @@ const unsavedChanges = computed(() => {
   return (
     (briefVisible && briefFingerprint() !== briefBaseline.value) ||
     storyEdited ||
-    scheduleEdited
+    scheduleEdited ||
+    (mode.value === 'plan' && (
+      Boolean(chatMessage.value.trim() || guideName.value.trim() || guideExcerpt.value.trim() || guideUrl.value.trim()) ||
+      guidesNeedApply.value
+    ))
   )
 })
 watch(unsavedChanges, (value) => emit('dirtyChange', value), {
@@ -260,6 +298,9 @@ async function loadPracticeBrief() {
   interests.value = ''
   mustVisit.value = ''
   candidates.value = example.candidates.map((c) => ({ ...c }))
+  selectedPois.value = []
+  guideReferences.value = []
+  poiQuery.value = ''
   allowExternal.value = false
   allowModel.value = false
   allowMemory.value = false
@@ -289,6 +330,8 @@ async function restorePreviousBrief() {
   interests.value = previous.interests
   mustVisit.value = previous.mustVisit
   candidates.value = previous.candidates.map((c) => ({ ...c }))
+  selectedPois.value = previous.selectedPois.map((poi) => ({ ...poi }))
+  guideReferences.value = previous.guideReferences.map((guide) => ({ ...guide }))
   allowExternal.value = previous.allowExternal
   allowModel.value = previous.allowModel
   practiceBackup.value = null
@@ -398,6 +441,49 @@ function scrollTo(element: HTMLElement | null) {
       : 'smooth',
   })
 }
+function continueTravelChat() {
+  scrollTo(travelChatInput.value)
+  travelChatInput.value?.focus({ preventScroll: true })
+}
+async function sendChat(message = chatMessage.value) {
+  if (busy.value || companionBusy.value || !message.trim()) return
+  message = message.trim()
+  companionBusy.value = true
+  companionError.value = ''
+  const history = displayedChat.value.slice(-8).map(({ role, text }) => ({ role, text }))
+  try {
+    const reply = await sendCompanionMessage({
+      message,
+      city_adcode: cityCode.value,
+      plan_id: run.value?.kind === 'plan' ? run.value.id : undefined,
+      history,
+      allow_model: Boolean(chatModel.value && capabilities.value?.chat_model_configured),
+    })
+    if (!alive) return
+    companionMessages.value = [
+      ...displayedChat.value,
+      { role: 'user', text: message },
+      { role: 'assistant', text: reply.text, sources: reply.sources },
+    ].slice(-24) as CompanionMessage[]
+    companionReply.value = reply
+    chatMessage.value = ''
+  } catch (e) {
+    companionError.value = e instanceof Error ? e.message : '小曦暂时没有收到，请再发一次。'
+  } finally {
+    companionBusy.value = false
+  }
+}
+async function applyCompanionPlan() {
+  if (!companionReply.value?.planning_request) return
+  chatMessage.value = companionReply.value.planning_request
+  await submit(false, true)
+}
+async function openGuidePanel(placeName = '') {
+  if (placeName) guideName.value = placeName
+  await nextTick()
+  if (guidePanel.value) guidePanel.value.open = true
+  scrollTo(guidePanel.value)
+}
 async function openBrief() {
   editingBrief.value = true
   await nextTick()
@@ -468,6 +554,14 @@ function restoreBrief(value: AgentRun) {
   candidates.value = Array.isArray(q.candidates)
     ? q.candidates.map((c) => ({ ...c }))
     : []
+  selectedPois.value = Array.isArray(q.selected_pois)
+    ? q.selected_pois.map(({ id, name }) => ({ id, name }))
+    : []
+  guideReferences.value = Array.isArray(q.guide_references)
+    ? q.guide_references.map(({ place_name, excerpt, source_url }) => ({
+        place_name, excerpt, source_url: source_url ?? null,
+      }))
+    : []
   allowExternal.value = false
   allowModel.value = false
   allowMemory.value = false
@@ -535,6 +629,7 @@ const statusText = computed(() => {
 })
 const sourceLabel = (source: string) =>
   source === 'amap' ? '高德查询' : '你提供的地点'
+const transportLabels = { driving: '驾车', transit: '公交／地铁', walking: '步行' }
 function clearConfirmation() {
   confirmation.value = null
   acknowledged.value = false
@@ -642,7 +737,7 @@ function split(value: string) {
     .slice(0, 3)
 }
 function addCandidate() {
-  if (candidates.value.length < 12)
+  if (!atPlaceLimit.value)
     candidates.value.push({
       name: '',
       longitude: '',
@@ -654,15 +749,94 @@ function addCandidate() {
       must_visit: false,
     })
 }
+function clearPoiSearch() {
+  poiSearchVersion += 1
+  poiResults.value = []
+  poiMessage.value = ''
+  poiSearching.value = false
+}
+watch(cityCode, () => {
+  selectedPois.value = []
+  clearPoiSearch()
+}, { flush: 'sync' })
+watch(poiQuery, clearPoiSearch, { flush: 'sync' })
+
+async function findPlaces() {
+  const keywords = poiQuery.value.trim()
+  if (!keywords || busy.value || poiSearching.value || inputPractice.value) return
+  clearPoiSearch()
+  const version = poiSearchVersion
+  poiSearching.value = true
+  try {
+    const result = await searchAttractions({
+      keywords, city_adcode: cityCode.value, category: '', page: 1, page_size: 6,
+    })
+    if (alive && version === poiSearchVersion) {
+      poiResults.value = result.items
+      if (!result.items.length) poiMessage.value = '这座城市没有搜到匹配的景点。试试景点的正式名称。'
+    }
+  } catch (e) {
+    if (alive && version === poiSearchVersion) {
+      poiMessage.value = e instanceof Error ? e.message : '地点查询失败，请重试。'
+    }
+  } finally {
+    if (alive && version === poiSearchVersion) poiSearching.value = false
+  }
+}
+function addSelectedPoi(poi: PoiItem) {
+  if (atPlaceLimit.value || selectedPois.value.some(({ id }) => id === poi.id)) return
+  selectedPois.value.push({ id: poi.id, name: poi.name })
+}
+function addGuideReference() {
+  if (guideReferences.value.length >= 12) return
+  const placeName = guideName.value.trim()
+  const excerpt = guideExcerpt.value.trim()
+  const sourceUrl = guideUrl.value.trim()
+  if (!placeName || excerpt.length < 2) return
+  guideReferences.value.push({ place_name: placeName, excerpt, source_url: sourceUrl || null })
+  guideName.value = ''
+  guideExcerpt.value = ''
+  guideUrl.value = ''
+  guideError.value = ''
+  clearConfirmation()
+}
+
+function guideErrorText(error: unknown) {
+  if (error instanceof ApiClientError && Array.isArray(error.details.fields)) {
+    const issue = error.details.fields.find((field) => String(field.field).includes('guide_references'))
+    if (issue?.message) return String(issue.message).replace(/^Value error, /, '')
+  }
+  return error instanceof Error ? error.message : '暂时无法应用攻略，请重试。'
+}
+
+async function replanWithGuides() {
+  const current = run.value
+  if (busy.value || !current || !['awaiting_confirmation', 'needs_input'].includes(current.status)) return
+  guideError.value = ''
+  busy.value = true
+  clearConfirmation()
+  try {
+    const updated = await editAgentDraft(current.id, {
+      expected_revision: current.revision,
+      guide_references: guideReferences.value,
+    })
+    useRun(updated)
+    await loadHistory()
+  } catch (e) {
+    guideError.value = guideErrorText(e)
+  } finally {
+    busy.value = false
+  }
+}
+
 function buildRequest(): RunCreate {
+  const cityName = cities.value.find((c) => c.code === cityCode.value)?.name ?? cityCode.value
   return {
     client_request_id: crypto.randomUUID(),
     kind: mode.value,
-    goal: goal.value.trim(),
+    goal: goal.value.trim() || `${cityName} ${days.value} 日游`,
     city_adcode: cityCode.value,
-    city_name:
-      cities.value.find((c) => c.code === cityCode.value)?.name ??
-      cityCode.value,
+    city_name: cityName,
     start_date: startDate.value,
     days: Number(days.value),
     daily_start: dailyStart.value,
@@ -681,26 +855,45 @@ function buildRequest(): RunCreate {
             stay_minutes: Number(c.stay_minutes),
           }))
         : [],
-    allow_external:
-      mode.value === 'plan' && allowExternal.value && !inputPractice.value,
+    selected_pois: mode.value === 'plan' && !inputPractice.value && selectedPois.value.length
+      ? selectedPois.value.map((poi) => ({ ...poi }))
+      : undefined,
+    guide_references: mode.value === 'plan' && !inputPractice.value &&
+      (guideReferences.value.length > 0 || guidesNeedApply.value)
+      ? guideReferences.value.map((guide) => ({ ...guide }))
+      : undefined,
+    allow_external: Boolean(planWithMap.value),
     allow_model:
       mode.value === 'plan' && allowModel.value && !inputPractice.value,
     allow_memory_access: mode.value === 'story' && allowMemory.value,
     memory_ids: [],
   }
 }
-async function submit(retry = false) {
-  if (busy.value) return
+async function submit(retry = false, fromChat = false) {
+  if (busy.value || companionBusy.value) return
   if (mode.value === 'story' && !allowMemory.value) {
     error.value = '请先授权读取选定城市与日期内的旅行记录。'
     return
   }
-  if (!goal.value.trim()) {
+  if (mode.value === 'story' && !goal.value.trim()) {
     error.value = '先告诉小曦，这次想怎样旅行或整理回忆。'
     return
   }
   const payload =
     retry && pendingRequest.value ? pendingRequest.value : buildRequest()
+  if (fromChat) {
+    const message = chatMessage.value.trim()
+    if (message.length < 2) return
+    payload.chat_message = message
+    if (run.value && ['awaiting_confirmation', 'confirmed', 'needs_input'].includes(run.value.status)) {
+      payload.previous_run_id = run.value.id
+      payload.goal = String(run.value.request.goal ?? payload.goal)
+    } else {
+      payload.goal = message
+    }
+    payload.allow_external = true
+    payload.allow_model = Boolean(chatModel.value && capabilities.value?.chat_model_configured)
+  }
   pendingRequest.value = payload
   busy.value = true
   error.value = ''
@@ -724,11 +917,24 @@ async function submit(retry = false) {
         title: `${PRACTICE_MARKER} ${payload.city_name} · 虚拟地点规划`,
       })
     }
+    if (payload.chat_message) {
+      restoreBrief(created)
+      chatMessage.value = ''
+      const resultReply = created.result.chat?.at(-1)
+      if (companionMessages.value.length && resultReply?.role === 'assistant') {
+        companionMessages.value = [...companionMessages.value, resultReply].slice(-24)
+      }
+      companionReply.value = null
+    }
     useRun(created)
     pendingRequest.value = null
     await loadHistory()
   } catch (e) {
     reportError(e)
+    if (payload.guide_references?.length && errorCode.value === 'VALIDATION_ERROR') {
+      guideError.value = guideErrorText(e)
+      await openGuidePanel()
+    }
   } finally {
     busy.value = false
   }
@@ -748,6 +954,9 @@ async function restore(id: string) {
     mode.value = value.kind
     await Promise.resolve()
     useRun(value)
+    companionMessages.value = []
+    companionReply.value = null
+    companionError.value = ''
     restoreBrief(value)
     briefBaseline.value = briefFingerprint()
     showHistory.value = false
@@ -799,7 +1008,7 @@ async function editDraft(excluded?: string) {
   }
 }
 async function previewSave() {
-  if (!run.value) return
+  if (!run.value || guidesNeedApply.value) return
   busy.value = true
   error.value = ''
   try {
@@ -898,6 +1107,102 @@ function eventLabel(status: string) {
           </div>
         </header>
         <section
+          v-if="mode === 'plan' && !inputPractice && !resultPractice"
+          class="xiaoxi-travel-chat"
+          aria-labelledby="xiaoxi-travel-chat-title"
+        >
+          <div class="xiaoxi-travel-chat-heading">
+            <MessageCircle :size="20" />
+            <h2 id="xiaoxi-travel-chat-title">和小曦聊行程</h2>
+          </div>
+          <ol v-if="displayedChat.length" class="xiaoxi-travel-messages" aria-label="旅行对话记录" aria-live="polite">
+            <li v-for="(turn, index) in displayedChat" :key="index" :class="turn.role">
+              <strong>{{ turn.role === 'user' ? '你' : '小曦' }}</strong>
+              <p>{{ turn.text }}</p>
+              <a v-for="source in turn.sources" :key="source.url" :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.label }}</a>
+            </li>
+          </ol>
+          <p v-if="run?.result.city_guide" class="xiaoxi-guide-note">
+            <strong>{{ run.result.city_guide.title }}</strong>
+            {{ run.result.city_guide.note }}
+            <a :href="run.result.city_guide.reference_url" target="_blank" rel="noopener noreferrer">查看城市指南索引</a>
+          </p>
+          <div v-if="companionReply?.choices?.length || companionReply?.planning_request" class="xiaoxi-travel-chat-actions">
+            <UiButton
+              v-for="choice in companionReply.choices"
+              :key="choice.message"
+              :disabled="busy || companionBusy"
+              @click="sendChat(choice.message)"
+            >{{ choice.label }}</UiButton>
+            <UiButton v-if="companionReply.planning_request" variant="secondary" :disabled="busy || companionBusy" @click="applyCompanionPlan">
+              {{ run ? '应用到行程' : '生成行程草案' }}
+            </UiButton>
+          </div>
+          <p v-if="companionError" role="alert">{{ companionError }}</p>
+          <form class="xiaoxi-travel-chat-form" @submit.prevent="sendChat()">
+            <label class="field">
+              <span>想聊点什么？</span>
+              <textarea
+                v-model="chatMessage"
+                ref="travelChatInput"
+                :aria-label="run ? '告诉小曦想怎么调整' : '旅行对话'"
+                placeholder="比如第一次自己去广州，有点紧张。中山大学值得去看看吗？"
+                rows="2"
+                maxlength="1500"
+                required
+                :disabled="busy || companionBusy"
+              />
+            </label>
+            <div class="xiaoxi-travel-chat-actions">
+              <label v-if="capabilities?.chat_model_configured" class="consent compact">
+                <input v-model="chatModel" type="checkbox" :disabled="busy || companionBusy" />
+                <span>允许 DeepSeek 参与对话<small>会发送近期对话与行程摘要，可能产生费用。</small></span>
+              </label>
+              <small v-else>当前使用本地旅行助手。</small>
+              <UiButton variant="primary" type="submit" :loading="companionBusy" :disabled="busy || !chatMessage.trim()">
+                发送
+              </UiButton>
+            </div>
+          </form>
+        </section>
+        <details
+          v-if="mode === 'plan' && !inputPractice && !resultPractice"
+          ref="guidePanel"
+          class="xiaoxi-guide-references"
+        >
+          <summary>攻略里的游玩时长 <span v-if="guideReferences.length">· {{ guideReferences.length }} 条</span></summary>
+          <p>粘贴小红书或其他攻略里写明游玩时间的那一句。景点名称请和行程里的一致。</p>
+          <form class="xiaoxi-guide-form" @submit.prevent="addGuideReference">
+            <label class="field">
+              <span>攻略对应的景点</span>
+              <input v-model="guideName" required maxlength="100" placeholder="例如广州塔" :disabled="busy" />
+            </label>
+            <label class="field">
+              <span>游玩时间摘录</span>
+              <textarea v-model="guideExcerpt" required minlength="2" maxlength="300" rows="2" placeholder="例如建议游玩 2–3 小时" :disabled="busy" />
+            </label>
+            <label class="field">
+              <span>攻略原文链接（可选）</span>
+              <input v-model="guideUrl" type="url" maxlength="1024" placeholder="https://…" :disabled="busy" />
+            </label>
+            <UiButton type="submit" :disabled="busy || guideReferences.length >= 12">加入攻略参考</UiButton>
+          </form>
+          <ul v-if="guideReferences.length" class="planner-poi-list" aria-label="已添加的攻略参考">
+            <li v-for="(guide, index) in guideReferences" :key="index">
+              <div><strong>{{ guide.place_name }}</strong><small>{{ guide.excerpt }}</small></div>
+              <UiButton variant="tertiary" :aria-label="`移除${guide.place_name}的第 ${index + 1} 条攻略`" :disabled="busy" @click="guideReferences.splice(index, 1)">移除</UiButton>
+            </li>
+          </ul>
+          <p v-if="guideError" role="alert">{{ guideError }}</p>
+          <UiButton
+            v-if="run && ['awaiting_confirmation', 'needs_input'].includes(run.status)"
+            variant="primary"
+            :disabled="busy || !guidesNeedApply"
+            @click="replanWithGuides"
+          >按攻略重排</UiButton>
+          <p v-else-if="guideReferences.length">下一次生成行程时会使用这些参考。</p>
+        </details>
+        <section
           v-if="mode === 'story'"
           class="story-workflow-bar"
           aria-label="故事整理流程"
@@ -908,6 +1213,12 @@ function eventLabel(status: string) {
         </section>
         <div v-if="mode === 'plan'" class="workflow-bar">
           <AgentWorkflowSteps :phase="taskPhase" />
+        </div>
+        <div v-if="mode === 'plan' && !inputPractice && !hasPlan" class="planner-practice-entry">
+          <UiButton variant="secondary" :disabled="busy" @click="loadPracticeBrief">
+            <Compass :size="16" />填入离线演练条件
+          </UiButton>
+          <span>用示例地点试排两天行程</span>
         </div>
         <section
           v-if="inputPractice || resultPractice"
@@ -1095,7 +1406,7 @@ function eventLabel(status: string) {
                       }}</span
                       ><textarea
                         v-model="goal"
-                        required
+                        :required="mode === 'story'"
                         minlength="2"
                         maxlength="1500"
                         rows="3"
@@ -1187,10 +1498,10 @@ function eventLabel(status: string) {
                     </p>
                   </section>
                   <section v-if="needsPlaceSource" class="place-source-notice" aria-label="生成行程前的地点条件">
-                    <UiStatus tone="warning">{{ capabilities?.amap_configured ? '请补充地点或授权在线查询' : '地点查询尚未连接' }}</UiStatus>
-                    <p>补充想去的地点后即可安排行程，也可以先用虚拟地点演练。</p>
-                    <div class="source-notice-actions"><UiButton variant="secondary" :disabled="busy" @click="openCandidates">补充自己的地点</UiButton><UiButton variant="tertiary" :disabled="busy" @click="loadPracticeBrief">填入离线演练条件<ArrowRight :size="16" /></UiButton></div>
-                    <details><summary>地点来源与限制</summary><p>{{ placeSourceExplanation }} 没有地点来源时会返回“信息不足”。</p></details>
+                    <UiStatus :tone="capabilitiesUnavailable || capabilities ? 'warning' : 'neutral'">
+                      {{ capabilitiesUnavailable ? '暂时无法读取高德状态' : capabilities ? '在线地点查询尚未连接' : '正在检查高德连接' }}
+                    </UiStatus>
+                    <p>可以使用页首的离线演练，直接试排行程。</p>
                   </section>
                   <template v-if="mode === 'plan'">
                     <section
@@ -1290,7 +1601,7 @@ function eventLabel(status: string) {
                       <details
                         ref="candidateDetails"
                         class="candidate-input"
-                        :open="candidates.length > 0"
+                        :open="!inputPractice && (selectedPois.length > 0 || candidates.length > 0)"
                       >
                         <summary>
                           <span class="candidate-symbol"
@@ -1298,17 +1609,53 @@ function eventLabel(status: string) {
                           ><span
                             ><strong>我已有想去的地点</strong
                             ><small>{{
-                              candidates.length
-                                ? `已补充 ${candidates.length} 个地点`
-                                : '有确定的地点？一起带进行程里。'
+                              selectedPois.length + candidates.length
+                                ? `已添加 ${selectedPois.length + candidates.length} 个地点`
+                                : '可选，自己挑景点或由小曦安排'
                             }}</small></span
                           ><ChevronDown :size="16" />
                         </summary>
                         <div class="candidate-content">
-                          <p>
-                            填写你掌握的地点与 GCJ-02
-                            坐标。系统会标注“你提供”，未经地图核验。
-                          </p>
+                          <div v-if="!inputPractice" class="planner-poi-picker">
+                            <div class="planner-poi-search">
+                              <label class="field">
+                                <span>搜索想去的地点</span>
+                                <input
+                                  v-model="poiQuery"
+                                  type="search"
+                                  maxlength="80"
+                                  placeholder="例如广州动物园"
+                                  @keydown.enter.prevent="findPlaces"
+                                />
+                              </label>
+                              <UiButton
+                                :loading="poiSearching"
+                                :disabled="!poiQuery.trim()"
+                                @click="findPlaces"
+                              >搜索高德</UiButton>
+                            </div>
+                            <p v-if="poiMessage" class="field-note" role="status">{{ poiMessage }}</p>
+                            <ul v-if="poiResults.length" class="planner-poi-list" aria-label="高德地点搜索结果">
+                              <li v-for="poi in poiResults" :key="poi.id">
+                                <div><strong>{{ poi.name }}</strong><small v-if="poi.address">{{ poi.address }}</small></div>
+                                <UiButton
+                                  variant="tertiary"
+                                  :aria-label="`加入${poi.name}`"
+                                  :disabled="atPlaceLimit || selectedPois.some(({ id }) => id === poi.id)"
+                                  @click="addSelectedPoi(poi)"
+                                >{{ selectedPois.some(({ id }) => id === poi.id) ? '已加入' : '加入' }}</UiButton>
+                              </li>
+                            </ul>
+                            <ul v-if="selectedPois.length" class="planner-poi-list" aria-label="已选必去地点">
+                              <li v-for="(poi, index) in selectedPois" :key="poi.id">
+                                <div><strong>{{ poi.name }}</strong><small>必去 · 高德地点</small></div>
+                                <UiButton variant="tertiary" :aria-label="`移除${poi.name}`" @click="selectedPois.splice(index, 1)">移除</UiButton>
+                              </li>
+                            </ul>
+                          </div>
+                          <details class="manual-coordinate-entry" :open="candidates.length > 0 && !inputPractice">
+                            <summary>{{ inputPractice ? '查看演练地点' : '手动输入坐标' }}</summary>
+                            <p v-if="!inputPractice" class="field-note">仅用于你已有坐标的地点。系统会标注为你提供的地点。</p>
                           <fieldset
                             v-for="(candidate, index) in candidates"
                             :key="index"
@@ -1410,11 +1757,13 @@ function eventLabel(status: string) {
                           <UiButton variant="secondary"
                             class="secondary-action add-place"
                             type="button"
-                            :disabled="candidates.length >= 12"
+                            v-if="!inputPractice"
+                            :disabled="atPlaceLimit"
                             @click="addCandidate"
                           >
                             <Plus :size="15" />添加地点
                           </UiButton>
+                          </details>
                         </div>
                       </details>
                     </section>
@@ -1433,7 +1782,7 @@ function eventLabel(status: string) {
                           :disabled="inputPractice"
                         /><span
                           >允许查询高德地点与路线<small
-                            >会向高德发送目的地、地点和出行方式，可能消耗服务额度。{{
+                            >也可点击「用高德生成行程」授权本次查询。高德会收到目的地、地点和出行方式。{{
                               mapAvailabilityNote
                             }}</small
                           ></span
@@ -1480,7 +1829,7 @@ function eventLabel(status: string) {
                           : mode === 'plan'
                             ? inputPractice
                               ? '生成离线演练草案'
-                              : '一起安排这段旅程'
+                              : planWithMap ? '用高德生成行程' : '一起安排这段旅程'
                             : '整理我的旅行故事'
                       }}<ArrowRight v-if="!busy" :size="17" />
                     </UiButton>
@@ -1736,6 +2085,12 @@ function eventLabel(status: string) {
                     role="tabpanel"
                     aria-labelledby="schedule-tab"
                   >
+                    <UiButton v-if="!resultPractice" variant="tertiary" :disabled="busy" @click="continueTravelChat">
+                      <MessageCircle :size="16" />继续和小曦调整
+                    </UiButton>
+                    <UiButton v-if="!resultPractice" variant="tertiary" :disabled="busy" @click="openGuidePanel()">
+                      <BookOpen :size="16" />给景点加攻略参考
+                    </UiButton>
                     <div class="day-tabs" role="group" aria-label="每日行程">
                       <button
                         v-for="day in run.result.days"
@@ -1805,10 +2160,25 @@ function eventLabel(status: string) {
                                 sourceLabel(stop.source)
                               }}</span
                             ><span
-                              ><Clock3 :size="11" />停留
+                              ><Clock3 :size="11" />{{ stop.stay_source === 'guide_reference' ? '攻略建议' : stop.stay_source === 'user_provided' ? '自定停留' : '预计停留' }}
                               {{ stop.stay_minutes }} 分钟</span
                             >
                           </p>
+                          <ul v-if="stop.stay_references?.length" class="xiaoxi-stay-sources" aria-label="游玩时长来源">
+                            <li v-for="(reference, index) in stop.stay_references" :key="index">
+                              <a v-if="reference.source_url" :href="reference.source_url" target="_blank" rel="noopener noreferrer">{{ reference.source }}</a>
+                              <span v-else>{{ reference.source }}</span>
+                              · {{ reference.from_minutes }}<template v-if="reference.to_minutes !== reference.from_minutes">–{{ reference.to_minutes }}</template> 分钟
+                            </li>
+                          </ul>
+                          <button
+                            v-if="!resultPractice && run.status !== 'confirmed'"
+                            class="text-button"
+                            type="button"
+                            :aria-label="`给${stop.name}加攻略参考`"
+                            :disabled="busy"
+                            @click="openGuidePanel(stop.name)"
+                          >参考攻略时长</button>
                           <small v-if="stop.timing_basis === 'planning_buffer'"
                             >时间含规划预留，交通尚需核实</small
                           ><small v-else>{{
@@ -1816,6 +2186,15 @@ function eventLabel(status: string) {
                               ? '按你设置的开始时间安排'
                               : '按已查询交通时间安排'
                           }}</small>
+                          <details v-if="index > 0 && currentDay.legs[index - 1]?.mode" class="xiaoxi-route-steps">
+                            <summary>
+                              {{ transportLabels[currentDay.legs[index - 1]!.mode!] }}
+                              · 约 {{ currentDay.legs[index - 1]!.duration_minutes }} 分钟
+                            </summary>
+                            <ol v-if="currentDay.legs[index - 1]?.instructions?.length">
+                              <li v-for="(step, stepIndex) in currentDay.legs[index - 1]!.instructions" :key="stepIndex">{{ step }}</li>
+                            </ol>
+                          </details>
                         </article>
                       </li>
                       <li v-if="!currentDay.stops.length" class="empty-day">
@@ -2217,6 +2596,10 @@ function eventLabel(status: string) {
                   </UiButton>
                 </div>
               </section>
+              <div v-else-if="guidesNeedApply" class="save-action-card">
+                <p>有尚未应用的攻略参考。重排后可核对并保存。</p>
+                <UiButton variant="secondary" :disabled="busy" @click="openGuidePanel()">查看攻略参考</UiButton>
+              </div>
               <div v-else-if="canSave" class="save-action-card">
                 <div>
                   <ShieldCheck :size="19" />
@@ -2248,16 +2631,20 @@ function eventLabel(status: string) {
                   <strong>{{
                     run.status === 'failed'
                       ? '本次任务还没有可保存的草案'
-                      : '再补充一点，旅程就更完整'
+                      : run.result.verification_status === 'information_missing'
+                        ? '这次没有找到可安排的地点'
+                        : '当前草案有约束冲突'
                   }}</strong>
-                  <p>补齐信息或解决冲突后，才能保存草案。</p>
+                  <p>{{ run.result.verification_status === 'information_missing' && mode === 'plan'
+                    ? '试试搜索具体地名，或从页首开始离线演练。'
+                    : '查看执行记录中的提示，调整后再保存。' }}</p>
                   <button
                     v-if="mode === 'plan'"
                     class="text-button"
                     type="button"
                     @click="openCandidates"
                   >
-                    补充想去的地点<ArrowRight :size="14" />
+                    {{ hasPlan ? '调整想去的地点' : '搜索想去的地点' }}<ArrowRight :size="14" />
                   </button>
                 </div>
               </div>
