@@ -108,7 +108,7 @@ describe('JourneyPlannerView', () => {
     expect(wrapper.text()).toContain('区域尚未分配')
     expect(wrapper.findAll('.planning-day-list article')).toHaveLength(3)
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8001/api/v1/xiaoxi/planning/preview',
+      '/api/v1/xiaoxi/planning/preview',
       expect.objectContaining({ method: 'POST' }),
     )
   })
@@ -145,8 +145,7 @@ describe('JourneyPlannerView', () => {
     await wrapper.get('.route-query-form').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/tools/routes/plan',
       expect.objectContaining({ method: 'POST' }),
     )

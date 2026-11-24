@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from typing import Literal
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.auth import get_actor
 from app.integrations.travel_llm import (
     TravelPlanningExtractor,
     get_travel_planning_extractor,
 )
 from app.main import app
+from app.models import User
 from app.xiaoxi_planning import (
     AttractionHypothesis,
     ModelPlanningDraft,
@@ -16,6 +19,16 @@ from app.xiaoxi_planning import (
     PoiSearchTheme,
 )
 
+
+@pytest.fixture(autouse=True)
+def explicit_provider_unit_actor():
+    previous = app.dependency_overrides.get(get_actor)
+    app.dependency_overrides[get_actor] = lambda: User(username="AuroraRovella")
+    yield
+    if previous is None:
+        app.dependency_overrides.pop(get_actor, None)
+    else:
+        app.dependency_overrides[get_actor] = previous
 
 class FakePlanningExtractor:
     provider: Literal["deepseek"] = "deepseek"

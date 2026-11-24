@@ -57,3 +57,5 @@ app.include_router(city_memories.router, prefix="/api/v1", dependencies=[Depends
 app.include_router(media_uploads.router, prefix="/api/v1", dependencies=[Depends(get_actor)])
 app.include_router(image_generation.router, prefix="/api/v1", dependencies=[Depends(get_actor)])
 
+app.include_router(trips.router, prefix="/api/v1", dependencies=[Depends(get_actor)])
+app.include_router(xiaoxi_planning.router, prefix="/api/v1", dependencies=[Depends(get_actor)])

@@ -43,7 +43,7 @@ test('规划：兴趣限制与信息不足恢复，不把未完成步骤或空�
     '[本地验收输入] 验证无地点时要求补充，不编造攻略',
   )
   await expect(page.locator('.travel-brief')).toBeVisible()
-  const folder = new URL('../../docs/design/governance/flow-screenshots/', import.meta.url)
+  const folder = new URL('../../.local/e2e-evidence/flow-screenshots/', import.meta.url)
   mkdirSync(folder, { recursive: true })
   await page
     .locator('.result-column')

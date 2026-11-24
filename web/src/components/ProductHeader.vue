@@ -42,9 +42,8 @@ const emit = defineEmits<{ select: [view: AppView]; connect: []; xiaoxi: [] }>()
   inset: 0 0 auto;
   z-index: 70;
   height: var(--product-header-height);
-  border-bottom: 1px solid #ede9e3;
-  background: rgba(255, 254, 251, 0.96);
-  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--canvas);
 }
 .product-header__inner {
   display: flex;
@@ -96,7 +95,7 @@ const emit = defineEmits<{ select: [view: AppView]; connect: []; xiaoxi: [] }>()
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: #efece4;
+  background: var(--sage);
   color: var(--text-secondary);
 }
 .header-account > svg {

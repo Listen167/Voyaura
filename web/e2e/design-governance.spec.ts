@@ -7,11 +7,12 @@ import { test, expect, type Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 const token = process.env.VOYAURA_E2E_TOKEN!
-const folder = new URL('../../docs/design/governance/design-checks/', import.meta.url)
+const folder = new URL('../../.local/e2e-evidence/design-checks/', import.meta.url)
 mkdirSync(folder, { recursive: true })
 const pages = [
   ['discover', '/', '.hero-description', '.search-go'],
   ['plan', '/plan', '.field > span', '.brief-submit .primary-action'],
+  ['story', '/journey/stories?compose=story&city=440100', '.goal-field > span', '.brief-submit .primary-action'],
   ['atlas', '/journey/map', '.journey-hero p', '.journey-hero > button'],
   ['memories', '/journey/stories', '.journey-hero p', '.journey-hero > button'],
   ['studio', '/studio', '.studio-header p', '.studio-pick-source'],
@@ -53,7 +54,7 @@ async function contrast(page: Page, selector: string) {
     return { fg, background, ratio: (Math.max(a, b) + .05) / (Math.min(a, b) + .05) }
   })
 }
-test('设计治理：真实六页五种屏宽、字号、触控、对比和任务入口，检查阶段仅GET', async ({ page }, info) => {
+test('设计治理：真实七页五种屏宽、字号、触控、对比和任务入口，检查阶段仅GET', async ({ page }, info) => {
   test.setTimeout(150000)
   await connect(page)
   const errors: string[] = [], writes: string[] = [], checks: object[] = []
@@ -90,6 +91,15 @@ test('设计治理：真实六页五种屏宽、字号、触控、对比和任�
         expect(inputFocus.width).toBe('3px')
         expect(inputFocus.color).toBe('rgb(165, 64, 35)')
 
+      }
+      if (name === 'story' && width >= 1280) {
+        const workspace = await page.locator('.workspace-grid').boundingBox()
+        const editor = await page.locator('.brief-column').boundingBox()
+        const context = await page.locator('.story-companion').boundingBox()
+        // Both sides must remain readable; a legacy planner rule must not squeeze the story context.
+        expect(editor!.width).toBeGreaterThanOrEqual(workspace!.width * 0.4)
+        expect(context!.width).toBeGreaterThanOrEqual(workspace!.width * 0.4)
+        expect(context!.x).toBeGreaterThan(editor!.x + editor!.width)
       }
       if (name === 'studio') {
         await expect(page.locator('.studio-pick-source')).toContainText('从旅行记忆选照片')

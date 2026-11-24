@@ -64,7 +64,7 @@ const guides: Array<{
   {
     view: 'journeys',
     title: '安排下一段旅程',
-    text: '告诉小曦目的地和节奏；没有在线地点时，可先填入离线演练条件。',
+    text: '选择目的地和日期，补充想去的地点，核对每天的安排。',
     icon: Compass,
     label: '去规划行程',
   },
@@ -104,7 +104,7 @@ const services = computed(() => [
         : '尚未连接'
       : '状态待确认',
     ready: !!capabilities.value?.amap_configured,
-    text: '未连接时，可补充自己的地点或使用演练。',
+    text: '也可以补充自己的地点，系统会标明信息来源。',
   },
   {
     name: '模型辅助理解',
@@ -128,7 +128,7 @@ const services = computed(() => [
         ? '暂无法确认'
         : '读取中',
     ready: !!catalog.value?.available,
-    text: '从自己的可用照片发起，原片与来源保留。',
+    text: '从自己的可用照片发起，作品可查看来源记录。',
   },
 ])
 async function loadResources() {
@@ -222,22 +222,22 @@ function date(value: string) {
 .account-page {
   width: min(1120px,calc(100% - 96px));
   margin: auto;
-  padding: var(--space-7) 0;
+  padding: 44px 0;
 }
-.account-hero,
-.account-section-title {
+.account-hero,.account-section-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: var(--space-5);
+  gap: 24px;
 }
 .account-hero {
-  margin-bottom: var(--space-6);
+  margin-bottom: 30px;
 }
 .account-hero h1 {
   margin: 0;
+  font-family: var(--font-editorial);
   font-size: var(--font-title);
-  font-weight: 650;
+  font-weight: 500;
   line-height: var(--line-heading);
   color: var(--text-primary);
 }
@@ -248,59 +248,73 @@ function date(value: string) {
   line-height: var(--line-body);
 }
 .account-identity {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-5) 0;
-  border-block: 1px solid var(--border-subtle);
+  gap: 22px;
+  padding: 34px 36px;
+  border: 0;
+  border-radius: 4px 20px 4px 4px;
+  background: var(--forest);
+  color: var(--text-on-forest);
 }
 .account-avatar {
   display: grid;
   place-items: center;
   flex: none;
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: var(--surface-soft);
-  color: var(--text-secondary);
+  width: 64px;
+  height: 74px;
+  border: 1px solid #94a28a;
+  border-radius: 28px 28px 4px 4px;
+  color: var(--sand);
+  background: transparent;
 }
 .account-identity h2 {
   font-size: var(--font-card);
   font-weight: 550;
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   overflow-wrap: anywhere;
+  color: var(--text-on-forest);
+}
+.account-identity .ui-status {
+  color: var(--text-on-forest);
+  background: #3b5447;
 }
 .account-identity dl {
   display: flex;
-  gap: var(--space-7);
+  gap: 44px;
   margin: 0 0 0 auto;
+  padding-left: 36px;
+  border-left: 1px solid #637362;
 }
 .account-identity dl>div {
   display: flex;
   flex-direction: column-reverse;
-  gap: 6px;
+  gap: 8px;
   min-width: 48px;
   text-align: center;
 }
 .account-identity dd {
   margin: 0;
-  font-size: var(--font-title);
-  font-weight: 550;
+  font-family: var(--font-editorial);
+  font-size: 2.5rem;
+  font-weight: 400;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
+  color: var(--sand);
 }
 .account-identity dt {
   font-size: var(--font-secondary);
-  color: var(--text-secondary);
+  color: var(--text-on-forest-muted);
 }
 .account-connect-state {
   display: flex;
   align-items: center;
-  gap: var(--space-5);
-  padding: var(--space-5);
+  gap: 24px;
+  padding: 30px;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-surface);
-  background: var(--surface-soft);
+  background: var(--sage);
 }
 .account-connect-state>svg {
   flex: none;
@@ -322,15 +336,16 @@ function date(value: string) {
   line-height: var(--line-body);
 }
 .account-recent {
-  margin-top: var(--space-7);
+  margin-top: 40px;
 }
 .account-section-title {
-  margin-bottom: var(--space-3);
+  margin-bottom: 8px;
 }
 .account-section-title h2 {
   margin: 0;
+  font-family: var(--font-editorial);
   font-size: var(--font-section);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-primary);
 }
 .account-task-list {
@@ -339,7 +354,7 @@ function date(value: string) {
 .account-task-list>button {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: 16px;
   width: 100%;
   min-height: 90px;
   padding: 18px 4px;
@@ -351,7 +366,7 @@ function date(value: string) {
   cursor: pointer;
 }
 .account-task-list>button:hover {
-  background: var(--surface-soft);
+  background: var(--sage);
 }
 .account-task-icon {
   display: grid;
@@ -387,20 +402,48 @@ function date(value: string) {
   flex: none;
 }
 .account-shortcuts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  margin-top: var(--space-6);
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 0;
+  margin-top: 20px;
+  padding: 20px 0;
+  border-block: 1px solid var(--border-subtle);
+}
+.account-shortcuts .ui-button {
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 10px 20px;
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-body);
+}
+.account-shortcuts .ui-button:first-child {
+  padding-left: 0;
+}
+.account-shortcuts .ui-button:last-child {
+  border-right: 0;
+}
+.account-shortcuts .ui-button>svg:first-child {
+  color: var(--action);
+}
+.account-shortcuts .ui-button>svg:last-child {
+  margin-left: auto;
+}
+.account-guide.ui-disclosure {
+  border-top: 0;
+  margin-top: 12px;
 }
 .account-guide-grid {
   display: grid;
   grid-template-columns: repeat(3,minmax(0,1fr));
-  gap: var(--space-6);
-  padding: var(--space-4) 0;
+  gap: 32px;
+  padding: 16px 0;
 }
 .account-guide-grid h3 {
-  font-size: var(--font-card);
-  font-weight: 550;
+  font-size: var(--font-body);
+  font-weight: 600;
   margin: 0 0 10px;
 }
 .account-guide-grid p {
@@ -412,13 +455,13 @@ function date(value: string) {
 .account-capabilities ul {
   list-style: none;
   padding: 0;
-  margin: var(--space-3) 0;
+  margin: 12px 0;
 }
 .account-capabilities li {
   display: flex;
-  gap: var(--space-3);
+  gap: 12px;
   align-items: flex-start;
-  padding: var(--space-4) 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 .account-capabilities li>svg {
@@ -440,14 +483,13 @@ function date(value: string) {
   line-height: var(--line-body);
   margin: 6px 0 0;
 }
-.account-list-state,
-.account-no-tasks {
+.account-list-state {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-4);
+  gap: 16px;
   min-height: 155px;
-  padding: var(--space-5);
+  padding: 24px;
   color: var(--text-secondary);
   font-size: var(--font-body);
   line-height: var(--line-body);
@@ -456,10 +498,35 @@ function date(value: string) {
   color: var(--danger);
   flex-wrap: wrap;
 }
+.account-no-tasks {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  min-height: 204px;
+  padding: 12px 24px 12px 8px;
+  color: var(--text-secondary);
+  font-size: var(--font-body);
+  line-height: var(--line-body);
+}
+.account-no-tasks::before {
+  content: '';
+  flex: none;
+  width: 162px;
+  height: 160px;
+  background: url('/art/travel-passport.svg') center/contain no-repeat;
+}
+.account-no-tasks>svg {
+  display: none;
+}
+.account-no-tasks>div {
+  flex: 1;
+  min-width: 0;
+}
 .account-no-tasks h3 {
-  font-size: var(--font-card);
-  font-weight: 550;
-  margin: 0 0 8px;
+  font-family: var(--font-editorial);
+  font-size: var(--font-section);
+  font-weight: 500;
+  margin: 0 0 10px;
   color: var(--text-primary);
 }
 .account-no-tasks p {
@@ -467,52 +534,87 @@ function date(value: string) {
   margin: 0;
   line-height: var(--line-body);
 }
-@media(max-width:899px) {
+.account-no-tasks .ui-button {
+  flex: none;
+}
+@media (max-width:899px) {
   .account-page {
     width: calc(100% - 40px);
-    padding-top: var(--space-6);
+    padding-top: 32px;
+  }
+  .account-identity {
+    gap: 18px;
+    padding: 28px;
   }
   .account-identity dl {
-    gap: var(--space-5);
+    gap: 26px;
+    padding-left: 24px;
   }
   .account-guide-grid {
     grid-template-columns: 1fr;
-    gap: var(--space-5);
+    gap: 24px;
   }
   .account-hero {
-    gap: var(--space-3);
+    gap: 12px;
+  }
+  .account-no-tasks {
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .account-no-tasks .ui-button {
+    margin-left: 182px;
+    margin-top: -24px;
+  }
+  .account-shortcuts .ui-button {
+    padding: 10px 12px;
+    font-size: var(--font-secondary);
   }
 }
-@media(max-width:580px) {
+@media (max-width:580px) {
   .account-page {
-    padding-top: var(--space-5);
+    padding-top: 26px;
   }
   .account-hero {
     align-items: flex-start;
     flex-wrap: wrap;
-    margin-bottom: var(--space-5);
+    gap: 12px;
+    margin-bottom: 22px;
   }
   .account-hero p {
     font-size: var(--font-secondary);
   }
+  .account-hero>.ui-button {
+    margin-left: auto;
+  }
   .account-identity {
     flex-wrap: wrap;
+    padding: 26px 24px;
+    gap: 18px;
   }
   .account-identity>div {
     flex: 1;
     min-width: 0;
   }
   .account-identity dl {
-    justify-content: space-around;
+    justify-content: space-between;
     width: 100%;
-    padding-top: var(--space-4);
-    margin: 0;
-    gap: var(--space-5);
+    padding: 24px 0 0;
+    margin: 4px 0 0;
+    border-left: 0;
+    border-top: 1px solid #637362;
+    gap: 16px;
+  }
+  .account-identity dd {
+    font-size: 2.25rem;
+  }
+  .account-avatar {
+    width: 52px;
+    height: 62px;
   }
   .account-connect-state {
     align-items: flex-start;
     flex-wrap: wrap;
-    padding: var(--space-5);
+    padding: 24px;
   }
   .account-connect-state>svg {
     display: none;
@@ -524,7 +626,7 @@ function date(value: string) {
     width: 100%;
   }
   .account-recent {
-    margin-top: var(--space-6);
+    margin-top: 30px;
   }
   .account-task-list>button {
     display: grid;
@@ -548,20 +650,32 @@ function date(value: string) {
     display: none;
   }
   .account-shortcuts {
-    display: grid;
     grid-template-columns: 1fr;
+    padding: 12px 0;
+    margin-top: 24px;
   }
   .account-shortcuts .ui-button {
-    justify-content: flex-start;
-  }
-  .account-shortcuts .ui-button>svg:last-child {
-    margin-left: auto;
+    padding: 12px 0;
+    border: 0;
   }
   .account-no-tasks {
+    flex-direction: column;
     align-items: flex-start;
-    flex-wrap: wrap;
     justify-content: flex-start;
-    padding: var(--space-5) 0;
+    gap: 16px;
+    padding: 8px 0 18px;
+  }
+  .account-no-tasks::before {
+    width: 142px;
+    height: 132px;
+    align-self: center;
+  }
+  .account-no-tasks>div {
+    width: 100%;
+  }
+  .account-no-tasks .ui-button {
+    margin: 0;
+    width: 100%;
   }
   .account-capabilities li {
     flex-wrap: wrap;
@@ -573,7 +687,7 @@ function date(value: string) {
     flex: 1 1 70%;
   }
 }
-@media(max-width:360px) {
+@media (max-width:360px) {
   .account-page {
     width: calc(100% - 32px);
   }

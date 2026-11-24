@@ -236,10 +236,11 @@ onBeforeUnmount(() => {
               ><span>/</span><span>旅行影像工作台</span>
             </div>
 
-            <h1>影像创作</h1>
+            <h1>影像创作<span class="studio-title-dot">。</span></h1>
             <p>从自己的照片出发，原片与每一次创作，都有来处。</p>
           </div>
           <UiButton variant="primary"
+            v-if="jobs.length || loading || error || favoriteOnly"
             class="studio-pick-source"
             type="button"
             @click="emit('memories')"
@@ -311,8 +312,19 @@ onBeforeUnmount(() => {
           </button>
         </section>
         <section v-else-if="!jobs.length" class="studio-start" aria-label="开始照片创作">
-          <div class="studio-start-copy"><h2>选一张照片，留住旅途的光。</h2><p>从城市记忆中选择自己的照片，原片与创作分别保留。</p><details class="ui-disclosure"><summary>如何创作</summary><ol><li>打开一段记忆，添加自己的照片。</li><li>选择风格，核对处理范围后确认生成。</li><li>成功后可对比原片、收藏或下载作品。</li></ol><p>当前生成服务尚未连接时，不会创建成功作品。</p></details></div>
-          <figure class="studio-inspiration"><img src="/discover/xiamen-coast.webp" alt="厦门海岸创作灵感摄影，非个人作品或生成结果" /><figcaption><span class="studio-photo-label">创作灵感参考 · 非个人作品</span><a href="/discover/credits.html" target="_blank" rel="noopener">摄影来源 ↗</a></figcaption></figure>
+          <span class="studio-film-edge" aria-hidden="true"></span>
+          <figure class="studio-inspiration">
+            <img src="/discover/xiamen-coast.webp" alt="厦门海岸创作灵感摄影，非个人作品或生成结果" />
+            <figcaption><span class="studio-photo-label">创作灵感参考 · 非个人作品</span><a href="/discover/credits.html" target="_blank" rel="noopener">摄影来源 ↗</a></figcaption>
+          </figure>
+          <div class="studio-start-copy">
+            <h2>选一张照片，<br />留住旅途的光。</h2>
+            <p>从城市记忆中选择自己的照片，原片与创作分别保留。</p>
+            <UiButton variant="primary" class="studio-pick-source" type="button" @click="emit('memories')">
+              <Camera :size="17" />从旅行记忆选照片<ArrowRight :size="16" />
+            </UiButton>
+            <details class="ui-disclosure"><summary>如何创作</summary><ol><li>打开一段记忆，添加自己的照片。</li><li>选择风格，核对处理范围后确认生成。</li><li>成功后可对比原片、收藏或下载作品。</li></ol><p>当前生成服务尚未连接时，不会创建成功作品。</p></details>
+          </div>
         </section>
         <div v-else class="studio-workspace">
           <aside class="studio-history" aria-label="生成历史">

@@ -31,7 +31,7 @@ test('真实离线演练：只填表→用户生成→地图联动与执行记�
   await page.getByRole('button', { name: '计划', exact: true }).click()
   await expect(page.getByRole('region', { name: '生成行程前的地点条件' })).toContainText('信息不足')
   const folder = new URL(
-    '../../docs/design/governance/practice-screenshots/',
+    '../../.local/e2e-evidence/practice-screenshots/',
     import.meta.url,
   )
   mkdirSync(folder, { recursive: true })

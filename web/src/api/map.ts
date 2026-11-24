@@ -1,3 +1,4 @@
+import { getOwnerUsername } from './session'
 import type { MapOverview } from '../types'
 import { request } from './http'
 
@@ -10,6 +11,6 @@ export const emptyOverview: MapOverview = {
   year_summaries: [],
 }
 
-export function getMapOverview(username = 'AuroraRovella'): Promise<MapOverview> {
+export function getMapOverview(username = getOwnerUsername()): Promise<MapOverview> {
   return request(`/map/overview?username=${encodeURIComponent(username)}`)
 }

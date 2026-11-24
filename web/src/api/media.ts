@@ -1,3 +1,4 @@
+import { getOwnerUsername } from './session'
 import type {
   AppErrorInfo,
   MediaDeleteConfirmResult,
@@ -126,7 +127,7 @@ export function completeMediaUpload(
   adcode: string,
   memoryId: string,
   assetId: string,
-  username = 'AuroraRovella',
+  username = getOwnerUsername(),
 ): Promise<MediaUploadCompleteResult> {
   return request(
     `/cities/${encodeURIComponent(adcode)}/memories/${encodeURIComponent(memoryId)}/media/${encodeURIComponent(assetId)}/complete`,
@@ -138,7 +139,7 @@ export function getMediaProcessingStatus(
   adcode: string,
   memoryId: string,
   assetId: string,
-  username = 'AuroraRovella',
+  username = getOwnerUsername(),
 ): Promise<MediaProcessingStatus> {
   const params = new URLSearchParams({ username })
   return request(
@@ -148,7 +149,7 @@ export function getMediaProcessingStatus(
 
 export function getCityMediaTasks(
   adcode: string,
-  username = 'AuroraRovella',
+  username = getOwnerUsername(),
 ): Promise<MediaTaskList> {
   const params = new URLSearchParams({ username })
   return request(`/cities/${encodeURIComponent(adcode)}/media/tasks?${params.toString()}`)

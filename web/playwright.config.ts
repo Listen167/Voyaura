@@ -12,7 +12,7 @@ export default defineConfig({
   expect: { timeout: 10000 },
   reporter: [
     ['list'],
-    ['junit', { outputFile: process.env.VOYAURA_E2E_REPORT ?? '../docs/design/governance/e2e.xml' }],
+    ['junit', { outputFile: process.env.VOYAURA_E2E_REPORT ?? '../.local/e2e-evidence/e2e.xml' }],
   ],
   outputDir: '../.local/playwright-artifacts',
   use: {

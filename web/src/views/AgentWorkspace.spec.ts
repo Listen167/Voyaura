@@ -86,7 +86,10 @@ function wideScreen() {
     },
   }
 }
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+})
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(api.getAgentCapabilities).mockResolvedValue({
@@ -101,6 +104,24 @@ beforeEach(() => {
   vi.mocked(api.createAgentRun).mockResolvedValue(fixture())
 })
 describe('小曦工作流交互边界（明确测试替身）', () => {
+  it('正常产品入口不提供演练，地点服务未连接时保留真实补充入口', async () => {
+    vi.stubEnv('VITE_ENABLE_PLANNER_PRACTICE', '')
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+    expect(wrapper.text()).not.toMatch(/演练|虚拟地点/)
+    expect(wrapper.text()).toContain('地点查询尚未连接')
+    expect(api.createAgentRun).not.toHaveBeenCalled()
+    await button(wrapper, '补充自己的地点').trigger('click')
+    expect(wrapper.find('details.candidate-input').attributes('open')).toBeDefined()
+  })
+  it('生产环境即使误设开发开关也不提供演练入口', async () => {
+    vi.stubEnv('DEV', false)
+    vi.stubEnv('VITE_ENABLE_PLANNER_PRACTICE', 'true')
+    const wrapper = mount(AgentWorkspace)
+    await flushPromises()
+    expect(wrapper.text()).not.toMatch(/演练|虚拟地点/)
+    expect(api.createAgentRun).not.toHaveBeenCalled()
+  })
   it('直达历史任务只读取并恢复原输入，授权默认关闭，不自动执行或确认', async () => {
     const run = {
       ...fixture(),
@@ -567,6 +588,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     expect(wrapper.find('.day-timeline').text()).toContain('保留的夹具地点')
   })
   it('演练入口只填写虚拟条件、不自动创建任务，并能恢复原输入', async () => {
+    vi.stubEnv('VITE_ENABLE_PLANNER_PRACTICE', 'true')
     const wrapper = mount(AgentWorkspace)
     await flushPromises()
     await wrapper.find('textarea').setValue('我自己原来填写的计划')
@@ -604,6 +626,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     expect(api.createAgentRun).not.toHaveBeenCalled()
   })
   it('主动生成演练时走创建和草案标记接口，明确关闭全部外部调用', async () => {
+    vi.stubEnv('VITE_ENABLE_PLANNER_PRACTICE', 'true')
     const value = fixture()
     vi.mocked(api.createAgentRun).mockImplementation(async (payload) => ({
       ...value,
@@ -638,6 +661,7 @@ describe('小曦工作流交互边界（明确测试替身）', () => {
     expect(api.confirmAgentRun).not.toHaveBeenCalled()
   })
   it('演练标记写入失败可用同一请求号重试，不伪装成已完成', async () => {
+    vi.stubEnv('VITE_ENABLE_PLANNER_PRACTICE', 'true')
     const value = fixture()
     vi.mocked(api.createAgentRun).mockImplementation(async (payload) => ({
       ...value,

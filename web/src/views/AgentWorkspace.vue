@@ -52,6 +52,7 @@ import AgentWorkflowSteps from '../components/AgentWorkflowSteps.vue'
 import { destinations } from '../content/discovery'
 import {
   PRACTICE_MARKER,
+  canUsePlannerPractice,
   isPracticeRequest,
   practiceBrief as createPracticeBrief,
 } from '../content/plannerPractice'
@@ -157,6 +158,7 @@ const candidateDetails = ref<HTMLDetailsElement | null>(null)
 const editingBrief = ref(false)
 const resultTab = ref<'schedule' | 'map' | 'execution'>('schedule')
 const practiceBackup = ref<ReturnType<typeof captureBrief> | null>(null)
+const practiceEnabled = canUsePlannerPractice()
 const practiceNotice = ref<HTMLElement | null>(null)
 const inputPractice = computed(
   () =>
@@ -190,8 +192,8 @@ const placeSourceExplanation = computed(() =>
       ? '目前还没有候选地点，也尚未授权在线查询。请补充自己的地点，或在下方允许查询高德。'
       : '当前尚未连接在线地点查询。只填写目的地和旅行想法，还不能生成具体站点；勾选查询授权也不会自动接通服务。'
     : capabilitiesUnavailable.value
-      ? '暂时无法确认地点服务状态。你可以补充地点，或先用离线演练体验完整流程。'
-      : '正在读取地点服务状态。你也可以先用离线演练体验完整流程。',
+      ? '暂时无法确认地点服务状态。你可以补充自己的地点，或稍后重试。'
+      : '正在读取地点服务状态。请稍候，或补充自己的地点。',
 )
 function captureBrief() {
   return {
@@ -245,7 +247,7 @@ function chooseMode(kind: 'plan' | 'story') {
   else mode.value = kind
 }
 async function loadPracticeBrief() {
-  if (busy.value) return
+  if (!practiceEnabled || busy.value) return
   if (!inputPractice.value) practiceBackup.value = captureBrief()
   const example = createPracticeBrief()
   goal.value = example.goal
@@ -851,7 +853,7 @@ function eventLabel(status: string) {
 <template>
   <main
     class="agent-workspace"
-    :class="{ 'showing-plan': hasPlan, 'story-workspace': mode === 'story' }"
+    :class="{ 'showing-plan': hasPlan, 'story-workspace': mode === 'story', 'composing-brief': !run }"
     :aria-label="mode === 'story' ? '小曦旅行故事工作台' : '小曦旅行规划工作台'"
   >
     <div class="workspace-scroll">
@@ -1071,6 +1073,7 @@ function eventLabel(status: string) {
                 <fieldset class="brief-fields" :disabled="busy">
                   <section
                     class="brief-card wish-card"
+                    data-chapter="01"
                     aria-labelledby="wish-title"
                   >
                     <header class="brief-card-heading">
@@ -1080,7 +1083,7 @@ function eventLabel(status: string) {
                           {{
                             mode === 'plan'
                               ? '旅行想法'
-                              : '想留下一段怎样的回忆'
+                              : '回忆的线索'
                           }}
                         </h2>
                         <p v-if="mode === 'story'">保留你在旅途中亲自写下的细节。</p>
@@ -1112,8 +1115,9 @@ function eventLabel(status: string) {
                       ></textarea>
                     </label>
                   </section>
-                  <section class="brief-card" aria-labelledby="basic-title">
+                  <section class="brief-card" data-chapter="02" aria-labelledby="basic-title">
                     <header class="brief-card-heading">
+                      <CalendarDays v-if="mode === 'plan'" :size="20" aria-hidden="true" />
 
                       <div>
                         <h2 id="basic-title">
@@ -1188,13 +1192,14 @@ function eventLabel(status: string) {
                   </section>
                   <section v-if="needsPlaceSource" class="place-source-notice" aria-label="生成行程前的地点条件">
                     <UiStatus tone="warning">{{ capabilities?.amap_configured ? '请补充地点或授权在线查询' : '地点查询尚未连接' }}</UiStatus>
-                    <p>补充想去的地点后即可安排行程，也可以先用虚拟地点演练。</p>
-                    <div class="source-notice-actions"><UiButton variant="secondary" :disabled="busy" @click="openCandidates">补充自己的地点</UiButton><UiButton variant="tertiary" :disabled="busy" @click="loadPracticeBrief">填入离线演练条件<ArrowRight :size="16" /></UiButton></div>
+                    <p>补充想去的地点，或连接地点查询后继续安排行程。</p>
+                    <div class="source-notice-actions"><UiButton variant="secondary" :disabled="busy" @click="openCandidates">补充自己的地点</UiButton><UiButton v-if="practiceEnabled" variant="tertiary" :disabled="busy" @click="loadPracticeBrief">填入离线演练条件<ArrowRight :size="16" /></UiButton></div>
                     <details><summary>地点来源与限制</summary><p>{{ placeSourceExplanation }} 没有地点来源时会返回“信息不足”。</p></details>
                   </section>
                   <template v-if="mode === 'plan'">
                     <section
                       class="brief-card preferences-card"
+                      data-chapter="03"
                       aria-labelledby="preferences-title"
                     >
                       <header class="brief-card-heading">
@@ -1554,15 +1559,19 @@ function eventLabel(status: string) {
               v-else-if="!run && mode === 'story'"
               class="story-companion"
             >
-              <div class="story-notebook-art" aria-hidden="true">
-                <BookOpen :size="72" :stroke-width="1" /><i><MapPin :size="18" />{{ contextCity }}</i>
-              </div>
-              <div>
-
-                <h2>让散落的记忆，<br />有一条自己的线索。</h2>
+              <div class="story-companion-copy">
+                <h2>让一段旅程，<br />在记忆中重新展开。</h2>
                 <p>
                   小曦只整理你授权的城市与日期中的已有记录。你可以查看原文、修改草稿，最后决定是否保存。
                 </p>
+              </div>
+              <figure class="story-memory-frame">
+                <img v-if="contextPhoto" :src="contextPhoto.image" :alt="contextPhoto.imageAlt" />
+                <div v-else class="story-journal-cover" aria-hidden="true"></div>
+                <figcaption><MapPin :size="17" /><span>{{ contextCity }}</span><small>{{ contextPhoto ? '目的地灵感图' : '所选城市' }}</small></figcaption>
+              </figure>
+              <div class="story-source-summary">
+                <div class="story-selected-range"><CalendarDays :size="18" /><div><strong>所选整理范围</strong><span>{{ summaryDate }} · {{ summaryDays }} 天</span></div></div>
                 <ul>
                   <li><BookOpen :size="17" />保留日期和原始文字来源</li>
                   <li>
@@ -1570,14 +1579,10 @@ function eventLabel(status: string) {
                   </li>
                   <li><Check :size="17" />没有记录时，会请你先补充</li>
                 </ul>
-                <button
-                  type="button"
-                  class="journey-text-action"
-                  @click="emit('memories')"
-                >
-                  先翻阅城市记忆<ArrowRight :size="15" />
-                </button>
               </div>
+              <button type="button" class="journey-text-action" @click="emit('memories')">
+                先翻阅城市记忆<ArrowRight :size="15" />
+              </button>
             </section>
             <div v-else-if="!run" class="planning-companion">
               <div

@@ -61,6 +61,8 @@ def auth_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, 
     "path",
     [
         "/api/v1/map/overview",
+        "/api/v1/trips",
+        "/api/v1/xiaoxi/planning/capability",
         "/api/v1/users/AuroraRovella",
         "/api/v1/cities/440100/memories",
         "/api/v1/image-styles",
@@ -212,3 +214,18 @@ def test_memory_idempotency_binds_content_and_normalizes_timezone(auth_client: T
     )
     assert changed.status_code == 409
     assert changed.json()["error"]["code"] == "MEMORY_IDEMPOTENCY_CONFLICT"
+
+
+def test_planning_preview_requires_owner_bearer(auth_client: TestClient) -> None:
+    response = auth_client.post("/api/v1/xiaoxi/planning/preview", json={"message": "杭州三天"})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "AUTH_REQUIRED"
+
+
+def test_formal_trip_user_cannot_be_spoofed(auth_client: TestClient) -> None:
+    response = auth_client.get(
+        "/api/v1/trips?username=OtherTraveler",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "AUTH_FORBIDDEN"

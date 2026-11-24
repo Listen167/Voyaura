@@ -1,3 +1,4 @@
+import { getOwnerUsername } from './session'
 import type {
   ImageJob,
   ImageJobCreateDraft,
@@ -24,13 +25,13 @@ export function createImageJob(payload: ImageJobCreateDraft): Promise<ImageJobCr
   return request('/image-jobs', { method: 'POST', body: JSON.stringify(payload) })
 }
 
-export function getImageJob(jobId: string, username = 'AuroraRovella'): Promise<ImageJob> {
+export function getImageJob(jobId: string, username = getOwnerUsername()): Promise<ImageJob> {
   const params = new URLSearchParams({ username })
   return request(`/image-jobs/${encodeURIComponent(jobId)}?${params.toString()}`)
 }
 
 export function getImageJobs(
-  username = 'AuroraRovella',
+  username = getOwnerUsername(),
   favoriteOnly = false,
 ): Promise<ImageJobList> {
   const params = new URLSearchParams({ username, favorite_only: String(favoriteOnly) })
@@ -40,7 +41,7 @@ export function getImageJobs(
 export function setImageJobFavorite(
   jobId: string,
   favorite: boolean,
-  username = 'AuroraRovella',
+  username = getOwnerUsername(),
 ): Promise<ImageJob> {
   return request(`/image-jobs/${encodeURIComponent(jobId)}/favorite`, {
     method: 'POST',

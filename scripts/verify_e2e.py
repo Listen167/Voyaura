@@ -61,6 +61,7 @@ def main() -> int:
         "VOYAURA_IMAGE_PROVIDER": "disabled",
         "VITE_AMAP_KEY": "",
         "VITE_AMAP_SECURITY_CODE": "",
+        "VITE_ENABLE_PLANNER_PRACTICE": "true",
         "VITE_API_BASE_URL": "/api/v1",
         "VOYAURA_DEV_API_URL": f"http://127.0.0.1:{api_port}",
         "VOYAURA_E2E_TOKEN": token,

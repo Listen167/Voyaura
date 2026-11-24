@@ -22,3 +22,21 @@ output/
 .DS_Store
 Thumbs.db
 
+# Private runtime data and generated verification outputs
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+node_modules/
+dist/
+test-results/
+playwright-report/
+*.bundle
+# Historical local review galleries are archived outside the delivery checkout
+docs/design/round*/
+docs/design/governance/
+docs/design/experience-entry/
+docs/design/editorial-refresh/
+docs/design/reference-composition/

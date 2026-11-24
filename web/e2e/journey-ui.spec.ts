@@ -11,7 +11,7 @@ const token =
 const apiUrl = process.env.VOYAURA_E2E_API_URL ?? 'http://127.0.0.1:8018/api/v1'
 const headers = { Authorization: `Bearer ${token}` }
 const folder = new URL(
-  '../../docs/design/governance/journey-screenshots/',
+  '../../.local/e2e-evidence/journey-screenshots/',
   import.meta.url,
 )
 mkdirSync(folder, { recursive: true })
@@ -121,9 +121,16 @@ test('第三轮：手动抵达预览与确认→真实文字记忆→带入日�
   await expect(deletePreview).toBeVisible()
   await expect(page.locator('.memory-delete-backdrop')).toHaveCSS('opacity','1')
   const destructive = deletePreview.getByRole('button', { name:'确认删除', exact:true })
-  const destructiveStyle = await destructive.evaluate(el => ({ color:getComputedStyle(el).color, background:getComputedStyle(el).backgroundColor, height:el.getBoundingClientRect().height }))
+  const destructiveStyle = await destructive.evaluate(el => {
+    const surface = document.createElement('span')
+    surface.style.backgroundColor = 'var(--surface)'
+    el.append(surface)
+    const result = { color:getComputedStyle(el).color, background:getComputedStyle(el).backgroundColor, surface:getComputedStyle(surface).backgroundColor, height:el.getBoundingClientRect().height }
+    surface.remove()
+    return result
+  })
   expect(destructiveStyle.color).toBe('rgb(180, 35, 47)')
-  expect(destructiveStyle.background).toBe('rgb(255, 254, 251)')
+  expect(destructiveStyle.background).toBe(destructiveStyle.surface)
   expect(destructiveStyle.height).toBeGreaterThanOrEqual(44)
   await page.screenshot({ animations:'disabled', path:fileURLToPath(new URL('delete-preview-' + info.project.name + '.png',folder)) })
   await deletePreview.getByRole('button', { name:'保留记忆', exact:true }).click()

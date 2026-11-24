@@ -10,3 +10,17 @@
 - [05-功能实现清单](05-feature-checklist.md)
 - [06-错误代码与排查](06-error-catalog.md)
 
+
+
+## 当前交付
+
+- [运行与验证](RUNBOOK.md)
+- [目录结构](../docs/REPOSITORY_GUIDE.md)
+- [整合说明](../docs/HANDOFF.md)
+- [路线策略](10-route-provider-strategy.md)
+- [对话与行程设计](11-conversational-itinerary-design.md)
+- [DeepSeek接入](12-deepseek-planning-checklist.md)
+- [前端API](13-frontend-api-routing.md)
+- [正式行程契约](14-itinerary-api-apifox.md)
+
+设计文档包含规划项，当前能力以README和测试摘要为准。

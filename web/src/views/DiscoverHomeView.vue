@@ -280,1385 +280,906 @@ function exploreMood(id: TravelMood) {
 <style scoped>
 .discover-page {
   position: absolute;
-  inset: var(--product-header-height) 0 0;
+  inset: var(--product-header-height) 0 var(--product-bottom-height);
   overflow: auto;
-  background: var(--page-bg);
   scroll-behavior: smooth;
   scroll-padding-top: 24px;
+  background: var(--canvas);
 }
 .discover-container {
-  width: min(1320px, calc(100% - 80px));
   margin: auto;
-  padding: 30px 0 0;
+  width: min(1180px,calc(100% - 80px));
+  padding: 22px 0 0;
+  position: relative;
 }
 .discover-hero {
   position: relative;
-  min-height: 405px;
-  border-radius: 20px;
-  background: #eaf1f2;
   isolation: isolate;
+  min-height: 282px;
+  background: var(--canvas);
+  border-radius: 20px;
 }
 .hero-image-wrap {
   position: absolute;
-  inset: 0;
-  border-radius: 20px;
   overflow: hidden;
   z-index: -1;
+  inset: 0;
+  border-radius: 20px;
 }
 .hero-image {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: 75% 48%;
+  object-position: 72% 60%;
 }
 .hero-light {
+  display: block;
+  background: linear-gradient(90deg,#faf8f4 0%,#faf8f4f5 29%,#faf8f4b0 47%,#faf8f400 70%);
   position: absolute;
   inset: 0;
 }
 .hero-content {
   position: relative;
   width: 620px;
-  max-width: 75%;
-  padding: 42px 0 39px 46px;
+  max-width: 65%;
+  padding: 22px 32px 14px;
 }
 .hero-content h1 {
-  letter-spacing: -1.8px;
-  font-weight: 650;
   color: var(--text-primary);
-  margin: 0 0 15px;
+  font-family: var(--font-editorial);
+  font-size: 2.625rem;
+  font-weight: 650;
+  letter-spacing: -1px;
+  line-height: 1.18;
+  margin: 0 0 10px;
 }
-.hero-content h1 > span {
-  color: var(--brand-orange);
+.hero-content h1>span {
+  color: var(--brand-accent);
 }
 .hero-description {
   color: var(--text-secondary);
-  line-height: 1.8;
-  margin: 0 0 24px;
+  font-size: var(--font-body);
+  max-width: none;
+  margin: 0 0 12px;
+  line-height: 1.6;
 }
 .hero-search-area {
   position: relative;
   z-index: 25;
+  width: 100%;
 }
 .discovery-search {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 6px 7px 6px 18px;
-  border: 1px solid #ffffffc9;
-  border-radius: var(--radius-surface);
-  background: #fffffff5;
-  box-shadow: 0 8px 30px #344d4712;
-}
-.discovery-search > svg {
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--surface);
   color: var(--text-secondary);
+  min-height: 54px;
+  padding: 4px 5px 4px 14px;
+  gap: 8px;
+  border-color: var(--border-subtle);
+  box-shadow: 0 3px 12px #263b3310;
+}
+.discovery-search:focus-within {
+  border-color: var(--action);
+}
+.discovery-search>svg {
   flex: none;
 }
 .discovery-search input {
   width: 100%;
   min-width: 0;
   border: 0;
-  outline: 0;
   background: transparent;
-  line-height: 1.6;
+  color: var(--text-primary);
+  font-size: var(--font-body);
+  height: 44px;
+}
+.discovery-search input::placeholder {
   color: var(--text-secondary);
+  opacity: 1;
 }
 .discovery-search input::-webkit-search-cancel-button {
   display: none;
 }
-.discovery-search:focus-within {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
+.clear-search,.search-city-panel>div>button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  min-width: 44px;
+  height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
 }
 .search-go {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
   flex: none;
-  height: 44px;
-  padding: 0 17px;
-  border: 0;
-  border-radius: var(--radius-surface);
+  border: 1px solid var(--action);
+  border-radius: var(--radius-control);
+  background: var(--action);
   color: white;
   font-size: var(--font-secondary);
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  min-height: 44px;
+  padding: 9px 15px;
+  gap: 10px;
 }
 .search-go:hover {
-  background: #bc4020;
-}
-.clear-search {
-  display: grid;
-  place-items: center;
-  padding: 4px;
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
+  background: var(--action-hover);
 }
 .hero-suggestions {
   display: flex;
-  align-items: center;
   flex-wrap: wrap;
-  gap: 9px;
-  margin-top: 14px;
+  align-items: center;
   color: var(--text-secondary);
+  margin-top: 0;
+  gap: 0 12px;
   font-size: var(--font-label);
-}
-.hero-suggestions > span {
-  font-size: var(--font-label);
-  color: var(--text-secondary);
 }
 .hero-suggestions button {
+  min-height: 44px;
+  padding: 7px 0;
   border: 0;
   background: transparent;
-  padding: 3px 0;
-  font-size: var(--font-label);
+  color: var(--text-secondary);
+  font-size: inherit;
   cursor: pointer;
 }
 .hero-suggestions button:hover {
-  color: var(--brand-ink-orange);
+  color: var(--action);
+  text-decoration: underline;
+  text-underline-offset: 5px;
 }
 .hero-suggestions i {
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: #a4afa6;
+  height: 12px;
+  width: 1px;
+  background: var(--border-subtle);
 }
 .hero-location {
+  position: absolute;
   display: flex;
   align-items: center;
-  gap: 7px;
-  position: absolute;
-  right: 24px;
-  bottom: 22px;
-  padding: 9px 12px;
-  border: 1px solid #ffffff6b;
-  border-radius: 20px;
-  backdrop-filter: blur(10px);
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-secondary);
   font-size: var(--font-label);
+  line-height: 1.6;
+  right: 16px;
+  bottom: 14px;
+  padding: 7px 12px;
+  border-radius: 24px;
+  background: var(--canvas);
 }
 .hero-location i {
-  width: 1px;
-  height: 10px;
-  background: #c4cec5;
+  width: 18px;
+  height: 1px;
+  background: var(--border-control);
 }
 .search-city-panel {
   position: absolute;
-  top: calc(100% + 10px);
-  left: 0;
-  right: 0;
-  padding: 18px;
-  border: 1px solid #ece7df;
+  inset: calc(100% + 8px) 0 auto;
+  padding: 20px;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-surface);
-  background: #fffefa;
-  box-shadow: 0 15px 40px #213d3524;
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
 }
-.search-city-panel > div:first-child {
+.search-city-panel>div:first-child {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
 }
 .search-city-panel strong {
-  font-size: var(--font-secondary);
-  font-weight: 600;
+  font-size: var(--font-body);
+  color: var(--text-primary);
 }
-.search-city-panel > div:first-child > button {
-  border: 0;
-  background: transparent;
+.search-city-panel p {
   color: var(--text-secondary);
-  cursor: pointer;
-  padding: 5px;
-}
-.search-city-panel > p {
   font-size: var(--font-secondary);
-  color: var(--text-secondary);
-  line-height: 1.7;
-  margin: 7px 0 15px;
+  line-height: var(--line-body);
+  margin: 6px 0 12px;
 }
 .search-city-options {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3,minmax(0,1fr));
   gap: 8px;
   margin-top: 12px;
 }
-.search-city-options > button {
+.search-city-options button {
   display: flex;
   align-items: center;
-  gap: 7px;
-  border: 1px solid #eee9e0;
+  justify-content: center;
+  gap: 6px;
+  min-height: 46px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
-  padding: 11px 9px;
-  background: #fbfaf5;
-  color: var(--text-secondary);
+  background: var(--canvas);
+  color: var(--text-body);
   font-size: var(--font-secondary);
   cursor: pointer;
 }
-.search-city-options > button > svg:first-child {
-  color: var(--action);
-}
-.search-city-options > button > svg:last-child {
-  margin-left: auto;
-  color: var(--text-secondary);
-}
-.search-city-options > button:hover {
-  background: #fff0e8;
-  border-color: #f1cbb8;
+.search-city-options button:hover {
+  background: var(--sage);
+  border-color: var(--border-control);
 }
 .discover-shortcuts {
   display: grid;
-  gap: 0;
-  padding: 18px 2px;
-  border-radius: var(--radius-surface);
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  border-block: 1px solid var(--border-subtle);
+  gap: 18px;
+  margin: 16px 0 24px;
+  padding: 0;
+  border: 0;
 }
-.discover-shortcuts > button {
+.discover-shortcuts>button {
   display: flex;
   align-items: center;
-  gap: 13px;
-  border: 0;
-  background: transparent;
+  border-right: 1px solid var(--border-subtle);
+  color: var(--text-primary);
   text-align: left;
   cursor: pointer;
-  min-width: 0;
+  min-height: 56px;
+  padding: 6px 14px;
+  gap: 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-soft);
 }
-.discover-shortcuts > button:last-child {
+.discover-shortcuts>button:first-child {
+  padding-left: 14px;
+}
+.discover-shortcuts>button:last-child {
   border-right: 0;
 }
 .shortcut-icon {
   display: grid;
   place-items: center;
+  flex: none;
+  color: var(--action);
   width: 44px;
   height: 44px;
-  flex: none;
-  border-radius: var(--radius-surface);
-  transition: transform 0.2s;
-}
-.peach {
-  color: var(--action);
-  background: #fff0e7;
-}
-.rose {
-  color: var(--action);
-  background: #fcecee;
-}
-.mint {
-  color: var(--text-secondary);
-  background: #e9f3ee;
-}
-.sand {
-  color: var(--text-secondary);
-  background: #fcf2df;
-}
-.lilac {
-  color: var(--text-secondary);
-  background: #f1ecf8;
-}
-.discover-shortcuts > button:hover .shortcut-icon {
-  transform: translateY(-3px);
-}
-.discover-shortcuts > button > span:nth-child(2) {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
+  border-radius: 10px;
 }
 .discover-shortcuts strong {
-  font-size: var(--font-secondary);
-  font-weight: 600;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-.discover-shortcuts small {
-  white-space: nowrap;
+  font-size: var(--font-body);
+  font-weight: 550;
 }
 .shortcut-arrow {
-  display: none;
-  flex: none;
   margin-left: auto;
   color: var(--text-secondary);
+  display: none;
+}
+.discover-shortcuts>button:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 5px;
 }
 .discover-lower-grid {
   display: grid;
-  gap: 28px;
-  align-items: stretch;
-}
-.destination-section {
-  min-width: 0;
+  grid-template-columns: minmax(0,1fr);
+  gap: 16px;
 }
 .discover-section-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  margin: 0 0 19px;
+  gap: 24px;
 }
 .discover-section-heading h2 {
-  line-height: 1.45;
-  letter-spacing: -0.5px;
-  font-weight: 650;
-  margin: 0 0 7px;
-}
-.discover-section-heading > div > p:last-child {
-  color: var(--text-secondary);
-  line-height: 1.7;
   margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-editorial);
+  letter-spacing: -.7px;
+  font-size: 1.75rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.discover-section-heading p {
+  color: var(--text-secondary);
+  margin: 4px 0 0;
+  font-size: var(--font-secondary);
+  line-height: 1.6;
 }
 .quiet-link {
-  min-height: 44px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-  padding: 7px 0;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  min-height: 44px;
+  padding: 10px 0;
   border: 0;
   background: transparent;
-  color: var(--text-secondary);
-  font-size: var(--font-label);
+  color: var(--text-body);
+  font-size: var(--font-secondary);
   cursor: pointer;
 }
 .quiet-link:hover {
-  color: var(--brand-ink-orange);
+  color: var(--action);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 .mood-filters {
   display: flex;
-  gap: 7px;
   align-items: center;
-  margin: 0 0 19px;
   flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 14px;
 }
-.mood-filters > button {
+.mood-filters button {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 8px;
   min-height: 44px;
-  border: 1px solid transparent;
-  border-radius: 18px;
-  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-secondary);
   cursor: pointer;
+  padding: 8px 16px;
+  border-bottom: 0;
+  border-radius: 24px;
+  background: var(--surface-soft);
 }
-.mood-filters > button.active {
-  color: var(--brand-ink-orange);
-  background: #fff0e7;
-  border-color: #f3d3c1;
+.mood-filters button.active {
   font-weight: 600;
+  background: var(--action);
+  color: white;
+  border-bottom-color: transparent;
 }
 .filter-dot {
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: #e97c54;
+  background: currentColor;
 }
 .destination-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 17px;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 16px;
 }
 .destination-card {
-  display: block;
-  overflow: hidden;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
   padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
   text-align: left;
   cursor: pointer;
-  transition: transform 0.25s,
-    box-shadow 0.25s;
-}
-.destination-photo {
   position: relative;
   display: block;
+  border-radius: 14px;
   overflow: hidden;
 }
-.destination-photo > img {
+.destination-photo {
   display: block;
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: var(--sage);
+  aspect-ratio: 2 / 1;
+  border-radius: 14px;
+}
+.destination-photo img {
   width: 100%;
   height: 100%;
+  display: block;
   object-fit: cover;
-  transition: transform 0.55s;
-}
-.destination-card:hover .destination-photo > img {
-  transform: scale(1.04);
-}
-.destination-photo-shade {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(0deg, #18362b36, transparent 50%);
+  transition: transform .3s ease;
 }
 .destination-photo-arrow {
   position: absolute;
-  right: 10px;
-  top: 10px;
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: #ffffffe8;
-  color: var(--text-secondary);
+  background: var(--surface);
+  color: var(--text-body);
+  top: auto;
+  bottom: 12px;
+  right: 12px;
+  z-index: 2;
+}
+.destination-card:hover .destination-photo img {
+  transform: scale(1.025);
 }
 .destination-content {
   display: block;
+  position: absolute;
+  inset: auto 60px 16px 20px;
+  width: auto;
+  padding: 0;
+  color: white;
+  z-index: 1;
 }
 .destination-title {
   display: flex;
+  flex-wrap: wrap;
   flex-direction: column;
-  margin-bottom: 8px;
+  align-items: flex-start;
+  gap: 2px;
 }
-.destination-title > strong {
-  font-weight: 650;
-  line-height: 1.25;
-}
-.discovery-companion {
-  position: relative;
-  overflow: hidden;
-}
-.ray-one {
-  left: 9%;
-  top: 44px;
-}
-.ray-two {
-  right: 18%;
-  top: 11px;
-  width: 3px;
-  height: 3px;
-}
-.ray-three {
-  left: 25%;
-  bottom: 4px;
-  width: 3px;
-  height: 3px;
-}
-.discovery-companion h2 {
+.destination-title strong {
+  font-family: var(--font-editorial);
+  font-size: 1.625rem;
   font-weight: 600;
-  letter-spacing: -0.6px;
-  color: var(--text-secondary);
+  line-height: 1.3;
 }
-.companion-description {
-  line-height: 1.9;
-  margin: 0 0 19px;
+.destination-title>span {
+  line-height: var(--line-body);
+  color: white;
+  font-size: var(--font-secondary);
 }
 .travel-map-invite {
   display: flex;
   align-items: center;
+  margin-top: 38px;
+  background: var(--sage) var(--texture-map) right center/420px auto no-repeat;
+  margin: 16px 0 0;
+  padding: 14px 20px;
   gap: 18px;
-  margin-top: 24px;
-  padding: 23px 21px;
-  border: 1px solid #e4e9de;
-  border-radius: var(--radius-surface);
-  background: linear-gradient(100deg, #edf2e9, #f4f5ec 65%);
+  min-height: 80px;
+  border-radius: 12px;
 }
 .map-invite-symbol {
-  position: relative;
   display: grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
+  position: relative;
   flex: none;
-  color: var(--text-secondary);
+  color: var(--forest);
+  width: 44px;
+  height: 44px;
 }
-.map-invite-symbol > svg:last-child {
+.map-invite-symbol>svg:last-child {
   position: absolute;
-  right: -1px;
-  top: -1px;
-  color: var(--action);
-  fill: #faf6ed;
+  right: 0;
+  top: 0;
+  background: var(--sage);
 }
 .map-invite-copy {
   min-width: 0;
+  flex: 1;
 }
 .map-invite-copy h3 {
-  font-size: var(--font-body);
+  font-family: var(--font-editorial);
+  color: var(--text-primary);
+  font-size: var(--font-section);
   font-weight: 600;
-  color: var(--text-secondary);
-  margin: 0 0 7px;
+  margin: 0 0 3px;
 }
 .map-invite-copy p {
-  font-size: var(--font-label);
   margin: 0;
-  line-height: 1.7;
+  color: var(--text-secondary);
+  font-size: var(--font-secondary);
+  line-height: var(--line-body);
 }
-.travel-map-invite > button {
-  min-height: 44px;
+.travel-map-invite>button {
   display: flex;
   align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-  margin-left: auto;
-  padding: 11px 12px;
-  border: 1px solid #cddac3;
-  border-radius: var(--radius-control);
-  background: #fffffa80;
-  color: var(--text-secondary);
-  font-size: var(--font-label);
+  gap: 10px;
+  min-height: 44px;
+  flex: none;
+  color: var(--text-primary);
+  font-size: var(--font-secondary);
   cursor: pointer;
+  padding: 8px 14px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--canvas);
 }
-.travel-map-invite > button:hover {
-  background: #fffef8;
+.travel-map-invite>button:hover {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+.discovery-companion {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0;
+  gap: 18px;
+  border: 0;
+  min-height: 58px;
+}
+.discovery-companion h2 {
+  margin: 0;
+  font-family: var(--font-editorial);
+  color: var(--text-primary);
+  font-size: var(--font-section);
+  line-height: 1.55;
+  font-weight: 600;
+}
+.discovery-companion h2 br {
+  display: none;
+}
+.companion-description {
+  flex: 1;
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: var(--line-body);
+  font-size: var(--font-secondary);
 }
 .discover-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 29px 0 24px;
+  gap: 20px;
   color: var(--text-secondary);
   font-size: var(--font-label);
+  padding: 16px 0 22px;
 }
 .discover-footer p {
+  font-size: var(--font-secondary);
+  font-weight: 600;
   margin: 0;
-}
-.discover-footer p > span {
-  margin: 0 7px;
 }
 .discover-footer a {
   display: flex;
   align-items: center;
   gap: 5px;
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-size: var(--font-label);
+  min-height: 44px;
+  color: inherit;
+  text-underline-offset: 4px;
 }
-.discover-footer a:hover {
-  color: var(--text-secondary);
+.discover-hero--immersive .hero-image-wrap {
+  inset: 0;
+  border-radius: var(--radius-surface);
 }
-@media (min-width: 1600px) {
-  .discover-container {
-    padding-top: 36px;
-  }
+.discover-hero--immersive .hero-content {
+  padding-left: 32px;
+}
+.discover-hero--immersive .hero-light {
+  display: block;
+  background: linear-gradient(90deg,var(--canvas) 0%,#faf8f4e8 30%,#faf8f400 85%);
+}
+.discover-hero--immersive .hero-location {
+  bottom: 14px;
+  right: 16px;
+  padding: 8px 12px;
+  background: var(--canvas);
+}
+.shortcut-icon.peach {
+  background: var(--action-soft);
+  color: var(--action);
+}
+.shortcut-icon.rose {
+  background: #f7e8e4;
+  color: var(--action);
+}
+.shortcut-icon.mint {
+  background: var(--sage);
+  color: var(--forest);
+}
+.shortcut-icon.sand {
+  background: #f3e7d2;
+  color: #79613f;
+}
+.destination-photo::after {
+  content: '';
+  position: absolute;
+  inset: 28% 0 0;
+  background: linear-gradient(0deg,#102b27e6,transparent);
+}
+.discovery-companion .ui-button {
+  background: var(--action);
+  color: white;
+  border-color: var(--action);
+}
+@media (min-width:1600px) {
   .discover-hero {
-    min-height: 440px;
+    min-height: 282px;
   }
   .hero-content {
-    padding: 50px 0 46px 55px;
+    padding-top: 22px;
+  }
+}
+@media (min-width:900px) and (max-width:1150px) {
+  .hero-content {
+    width: 590px;
+    max-width: 70%;
   }
   .hero-content h1 {
-    font-size: var(--font-display);
+    font-size: 2.375rem;
   }
-  .discover-lower-grid {
-    grid-template-columns: minmax(0, 1fr) 290px;
+  .hero-search-area {
+    width: 100%;
   }
-}
-@media (min-width: 900px) and (max-width: 1150px) {
-  .discover-container {
-    width: calc(100% - 48px);
-  }
-  .discover-shortcuts > button {
-    padding: 4px 13px;
-    gap: 9px;
-  }
-  .shortcut-icon {
-    width: 38px;
-    height: 38px;
-    border-radius: var(--radius-surface);
-  }
-  .discover-shortcuts strong {
-    font-size: var(--font-secondary);
-  }
-  .discover-shortcuts small {
-    font-size: var(--font-label);
-  }
-  .discover-lower-grid {
-    grid-template-columns: minmax(0, 1fr) 250px;
-    gap: 20px;
-  }
-  .destination-grid {
-    gap: 12px;
-  }
-  .destination-content {
-    padding: 14px 11px;
-  }
-  .destination-title > strong {
-    font-size: var(--font-section);
-  }
-  .discovery-companion {
-    padding: 23px 18px;
-    flex-direction: row;
-    min-width: 0;
-    flex-wrap: wrap;
-  }
-  .discovery-companion h2 {
-    font-size: var(--font-section);
-  }
-  .travel-map-invite {
-    padding: 20px 15px;
-    gap: 10px;
-  }
-  .travel-map-invite > button {
-    min-height: 44px;
-    padding: 9px;
-    font-size: var(--font-label);
+  .discover-shortcuts>button {
+    padding: 6px 10px;
+    gap: 8px;
   }
 }
-@media (max-width: 899px) {
-  .discover-page {
-    bottom: calc(68px + env(safe-area-inset-bottom));
-    scroll-padding-top: 16px;
-  }
+@media (max-width:899px) {
   .discover-container {
     width: calc(100% - 40px);
-    padding-top: 20px;
+    padding-top: 24px;
   }
   .discover-hero {
-    min-height: 365px;
-  }
-  .hero-content {
-    width: 570px;
-    max-width: 85%;
-    padding: 34px 0 32px 30px;
-  }
-  .hero-content h1 {
-    font-size: var(--font-display);
-  }
-  .hero-light {
-    background: linear-gradient(90deg, #f9f8f3f5 0%, #f9f8f3d9 30%, #f9f8f32e 80%);
-  }
-  .hero-description {
-    font-size: var(--font-secondary);
-  }
-  .hero-location {
-    font-size: var(--font-label);
-    right: 16px;
-    bottom: 16px;
-  }
-  .discover-shortcuts {
-    margin: 17px 0 28px;
-    padding: 15px 6px;
-  }
-  .discover-shortcuts > button {
+    display: flex;
     flex-direction: column;
-    gap: 9px;
-    padding: 0 4px;
-    border-right: 0;
-    text-align: center;
-  }
-  .discover-shortcuts small {
-    display: none;
-  }
-  .discover-shortcuts > button > span:nth-child(2) {
-    gap: 0;
-  }
-  .discover-shortcuts strong {
-    font-size: var(--font-secondary);
-    font-weight: 500;
-  }
-  .shortcut-icon {
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-  }
-  .discover-lower-grid {
-    grid-template-columns: 1fr;
-    gap: 26px;
-  }
-  .discovery-companion {
-    display: grid;
-    grid-template-columns: 120px minmax(0, 1fr);
-    column-gap: 22px;
-    padding: 25px;
-    flex-direction: row;
-    min-width: 0;
-    flex-wrap: wrap;
-  }
-  .discovery-companion .companion-eyebrow,
-.discovery-companion h2,
-.companion-description,
-.companion-start {
-    grid-column: 2;
-  }
-  .discovery-companion h2 {
-    font-size: var(--font-section);
-  }
-  .discovery-companion h2 > br {
-    display: none;
-  }
-  .companion-description {
-    margin-bottom: 15px;
-  }
-  .desktop-break {
-    display: none;
-  }
-  .discover-section-heading h2 {
-    font-size: var(--font-section);
-  }
-  .discover-footer {
-    padding: 25px 0 20px;
-  }
-}
-@media (max-width: 600px) {
-  .discover-container {
-    width: calc(100% - 32px);
-    padding-top: 15px;
-  }
-  .discover-hero {
-    min-height: 333px;
-    border-radius: 15px;
-  }
-  .hero-image-wrap {
-    border-radius: 15px;
-  }
-  .hero-image {
-    object-position: 71% 46%;
-  }
-  .hero-light {
-    background: linear-gradient(90deg, #faf8f2f5 0%, #faf8f2c4 37%, #faf8f23d 82%),
-      linear-gradient(0deg, #faf8f2e8 0%, #faf8f200 30%);
+    min-height: 0;
   }
   .hero-content {
     width: 100%;
-    max-width: 100%;
-    padding: 28px 21px 34px;
+    max-width: none;
+    padding: 10px 0 20px;
   }
   .hero-content h1 {
-    font-size: var(--font-title);
-    line-height: 1.34;
-    letter-spacing: -0.8px;
-    margin-bottom: 11px;
+    margin-bottom: 18px;
+    letter-spacing: -1px;
+    font-size: 2.25rem;
+    font-weight: 600;
   }
   .hero-description {
-    font-size: var(--font-label);
-    line-height: 1.8;
-    max-width: 230px;
+    max-width: none;
     margin-bottom: 22px;
   }
-  .discovery-search {
-    height: auto;
-    padding: 5px 5px 5px 12px;
-    gap: 8px;
-    border-radius: var(--radius-surface);
-    min-height: 56px;
+  .hero-search-area {
+    width: 100%;
   }
-  .discovery-search > svg {
-    width: 18px;
-    height: 18px;
-  }
-  .discovery-search input {
-    font-size: var(--font-body);
-    min-height: 44px;
-  }
-  .search-go {
-    height: 39px;
-    width: 40px;
-    padding: 0;
-    border-radius: var(--radius-surface);
-    gap: 0;
-  }
-  .search-go > span {
-    display: none;
-  }
-  .hero-suggestions {
-    gap: 7px;
-    margin-top: 12px;
-  }
-  .hero-suggestions button {
-    min-height: 44px;
-    font-size: var(--font-label);
-    line-height: 1.6;
-  }
-  .hero-suggestions > span {
-    font-size: var(--font-label);
-  }
-  .hero-location {
-    bottom: 12px;
-    left: 22px;
-    right: auto;
-    font-size: var(--font-label);
-    gap: 5px;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    color: var(--text-secondary);
-    backdrop-filter: none;
-  }
-  .hero-location > svg {
-    width: 10px;
-    height: 10px;
-  }
-  .hero-location i {
-    height: 8px;
-    background: #aebeb0;
-  }
-  .discover-shortcuts {
-    margin: 15px 0 27px;
-    padding: 15px 4px 14px;
-    border-radius: var(--radius-surface);
-  }
-  .shortcut-icon {
-    width: 36px;
-    height: 36px;
-  }
-  .shortcut-icon > svg {
-    width: 19px;
-    height: 19px;
-  }
-  .discover-shortcuts > button {
-    gap: 8px;
-  }
-  .discover-shortcuts strong {
-    font-size: var(--font-label);
-    letter-spacing: 0;
-  }
-  .discover-section-heading {
-    gap: 8px;
-    margin-bottom: 15px;
-  }
-  .discover-section-heading h2 {
-    font-size: var(--font-section);
-    letter-spacing: -0.6px;
-    margin-bottom: 6px;
-  }
-  .discover-section-heading > div > p:last-child {
-    font-size: var(--font-label);
-    line-height: 1.8;
-  }
-  .more-destinations {
-    min-height: 44px;
-    font-size: 0;
-    min-width: 32px;
-    height: 32px;
-    justify-content: center;
-    border: 1px solid #e6e6db;
-    border-radius: 50%;
-    padding: 0;
-  }
-  .more-destinations > svg {
-    width: 16px;
-    height: 16px;
-  }
-  .mood-filters {
-    flex-wrap: wrap;
-    gap: 2px;
-    margin-bottom: 16px;
-  }
-  .mood-filters > button {
-    padding: 7px 9px;
-    min-height: 44px;
-    font-size: var(--font-label);
-    gap: 4px;
-    white-space: nowrap;
-  }
-  .destination-grid {
-    display: flex;
-    gap: 13px;
-    margin-right: -16px;
-    padding: 3px 16px 12px 0;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
-  }
-  .destination-grid::-webkit-scrollbar {
-    display: none;
-  }
-  .destination-card {
-    flex: 0 0 226px;
-    scroll-snap-align: start;
-    border-radius: var(--radius-surface);
-    box-shadow: none;
-  }
-  .destination-card:hover {
-    transform: none;
-  }
-  .destination-photo {
-    aspect-ratio: 1.38;
-  }
-  .destination-content {
-    padding: 15px 14px;
-  }
-  .destination-title > strong {
-    font-size: var(--font-section);
-  }
-  .destination-title > span {
-    font-size: var(--font-secondary);
-  }
-  .travel-map-invite {
+  .hero-image-wrap {
     position: relative;
-    align-items: flex-start;
-    gap: 11px;
-    margin-top: 14px;
-    padding: 17px 15px 18px;
-    border-radius: var(--radius-surface);
-  }
-  .map-invite-symbol {
-    width: 37px;
-    height: 41px;
-  }
-  .map-invite-symbol > svg:first-child {
-    width: 30px;
-    height: 30px;
-  }
-  .map-invite-symbol > svg:last-child {
-    width: 15px;
-    height: 15px;
-  }
-  .map-invite-copy {
-    padding-top: 4px;
-    padding-bottom: 32px;
-  }
-  .map-invite-copy h3 {
-    font-size: var(--font-secondary);
-    margin-bottom: 7px;
-  }
-  .map-invite-copy p {
-    font-size: var(--font-label);
-    line-height: 1.8;
-  }
-  .travel-map-invite > button {
-    min-height: 44px;
-    position: absolute;
-    left: 63px;
-    bottom: 15px;
-    border: 0;
-    background: transparent;
-    padding: 0;
-    gap: 5px;
-    font-size: var(--font-label);
-    min-height: 44px;
-  }
-  .travel-map-invite > button > svg {
-    width: 13px;
-    height: 13px;
-  }
-  .discovery-companion {
-    padding: 21px 18px;
-    column-gap: 14px;
-    grid-template-columns: 74px minmax(0, 1fr);
-    border-radius: var(--radius-surface);
-    flex-direction: row;
-    min-width: 0;
-    flex-wrap: wrap;
-  }
-  .ray-one {
-    left: -10%;
-  }
-  .ray-two {
-    right: 3%;
-    top: 3px;
-  }
-  .discovery-companion h2 {
-    font-size: var(--font-card);
-    letter-spacing: -0.4px;
-    line-height: 1.5;
-    margin-bottom: 8px;
-  }
-  .discovery-companion h2 > br {
-    display: none;
-  }
-  .companion-description {
-    font-size: var(--font-label);
-    line-height: 1.9;
-    margin-bottom: 13px;
-  }
-  .discover-footer {
-    align-items: flex-start;
-    gap: 10px;
-    padding: 23px 0 19px;
-    font-size: var(--font-label);
-  }
-  .discover-footer p {
-    max-width: 200px;
-    line-height: 1.8;
-  }
-  .discover-footer p > span {
-    margin: 0 4px;
-  }
-  .discover-footer a {
-    font-size: var(--font-label);
-    gap: 3px;
-    white-space: nowrap;
-    line-height: 1.8;
-  }
-  .discover-footer a > svg {
-    width: 10px;
-    height: 10px;
-  }
-  .search-city-panel {
-    padding: 14px;
-    border-radius: var(--radius-surface);
-  }
-  .search-city-panel strong {
-    font-size: var(--font-secondary);
-  }
-  .search-city-panel > p {
-    font-size: var(--font-label);
-    line-height: 1.8;
-  }
-  .search-city-options {
-    gap: 7px;
-  }
-  .search-city-options > button {
-    font-size: var(--font-secondary);
-    padding: 12px 7px;
-    gap: 4px;
-  }
-  .search-city-options > button > svg:last-child {
-    width: 12px;
-    height: 12px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .discover-page {
-    scroll-behavior: auto;
-  }
-  .destination-card,
-.destination-photo > img,
-.shortcut-icon {
-    transition: none;
-  }
-}
-.discover-shortcuts small {
-  font-size: var(--font-label);
-}
-.discover-section-heading > div > p:last-child {
-  font-size: var(--font-secondary);
-}
-.mood-filters > button {
-  font-size: var(--font-secondary);
-}
-.companion-description {
-  font-size: var(--font-secondary);
-}
-.map-invite-copy p,
-.travel-map-invite > button {
-  min-height: 44px;
-  font-size: var(--font-secondary);
-}
-.discover-footer,
-.discover-footer a {
-  font-size: var(--font-label);
-}
-@media (max-width: 600px) {
-  .hero-content h1 {
-    font-size: var(--font-title);
-  }
-  .hero-description {
-    font-size: var(--font-secondary);
-    max-width: 260px;
-  }
-  .discover-hero {
-    min-height: 355px;
-  }
-  .discovery-search input {
-    font-size: var(--font-body);
-    min-height: 44px;
-  }
-  .hero-suggestions button,
-.hero-suggestions > span {
-    font-size: var(--font-label);
-    min-height: 44px;
-  }
-  .hero-suggestions {
-    gap: 6px;
+    inset: auto;
+    width: 100%;
+    order: 2;
+    z-index: 0;
+    border-radius: 14px;
+    height: 200px;
   }
   .hero-location {
-    font-size: var(--font-label);
-    bottom: 12px;
+    position: static;
+    order: 3;
+    justify-content: flex-end;
+    padding: 12px 0 0;
+    background: transparent;
   }
-  .discover-shortcuts strong {
-    font-size: var(--font-label);
+  .hero-suggestions {
+    gap: 0 12px;
+    margin-top: 8px;
   }
-  .discover-section-heading > div > p:last-child {
-    font-size: var(--font-secondary);
+  .discover-shortcuts {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: 12px;
+    margin: 20px 0 28px;
+    padding: 0;
   }
-  .destination-title > span {
-    font-size: var(--font-secondary);
-  }
-  .mood-filters > button {
-    font-size: var(--font-label);
-    min-height: 44px;
-  }
-  .more-destinations {
-    min-height: 44px;
-    min-width: 40px;
-    height: 40px;
-  }
-  .map-invite-copy p,
-.travel-map-invite > button {
-    min-height: 44px;
-    font-size: var(--font-label);
-  }
-  .companion-description {
-    font-size: var(--font-secondary);
-  }
-  .discover-footer,
-.discover-footer a {
-    font-size: var(--font-label);
-  }
-  .discover-footer p {
-    max-width: 205px;
-  }
-  .discovery-companion h2 {
-    font-size: var(--font-section);
-  }
-}
-.hero-description,
-.discover-section-heading > div > p:last-child {
-  color: var(--text-secondary);
-}
-.discover-shortcuts small {
-  color: var(--text-secondary);
-}
-.mood-filters > button {
-  color: var(--text-secondary);
-}
-.map-invite-copy p {
-  color: var(--text-secondary);
-}
-.companion-description {
-  color: var(--text-secondary);
-}
-.discover-footer,
-.discover-footer a {
-  color: var(--text-secondary);
-}
-.hero-suggestions button {
-  min-height: 44px;
-  color: var(--text-secondary);
-}
-.discovery-search input::placeholder {
-  color: var(--text-secondary);
-}
-.discover-hero--immersive .hero-light {
-  background: linear-gradient(90deg, #102c38b8 0%, #173a4866 42%, #173a4800 80%),
-    linear-gradient(0deg, #132b3647, transparent 65%);
-}
-.discover-hero--immersive .hero-content h1 {
-  color: #fffdf6;
-  text-shadow: 0 2px 16px #172e3e26;
-}
-.discover-hero--immersive .hero-content h1 > span {
-  color: var(--action);
-}
-.discover-hero--immersive .hero-description {
-  color: #f4f8f2;
-}
-.discover-hero--immersive .hero-suggestions,
-.discover-hero--immersive .hero-suggestions > span,
-.discover-hero--immersive .hero-suggestions button {
-  min-height: 44px;
-  color: #f7fbf2;
-}
-.discover-hero--immersive .hero-suggestions i {
-  background: #e4eee6;
-}
-@media (max-width: 600px) {
-  .discover-hero--immersive .hero-light {
-    background: linear-gradient(90deg, #122c39ba, #193c4666 65%, #1b3b453b),
-      linear-gradient(0deg, #16323e55, transparent 70%);
-  }
-  .discover-hero--immersive .hero-location {
-    color: #f3faf2;
-  }
-  .discover-hero--immersive .hero-location i {
-    background: #daeadd;
-  }
-}
-.discover-shortcuts {
-  grid-template-columns: repeat(4,minmax(0,1fr));
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  margin: 24px 0 40px;
-}
-.discover-shortcuts > button {
-  min-height: 64px;
-  padding: 8px 12px;
-  border-right: 0;
-}
-.discover-lower-grid {
-  grid-template-columns: minmax(0,1fr);
-}
-.discovery-companion {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 28px 0;
-  border: 0;
-  border-top: 1px solid var(--border-subtle);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  flex-direction: row;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-.discovery-companion h2 {
-  font-size: var(--font-section);
-  line-height: var(--line-heading);
-  margin: 0;
-}
-.discovery-companion h2 br {
-  display: none;
-}
-.discovery-companion p {
-  flex: 1;
-  margin: 0;
-  font-size: var(--font-body);
-  color: var(--text-secondary);
-}
-.destination-card {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-.destination-card:hover {
-  transform: none;
-  box-shadow: none;
-}
-.destination-card:focus-visible {
-  outline-offset: 5px;
-}
-.destination-photo {
-  border-radius: var(--radius-photo);
-  aspect-ratio: 1.55;
-}
-.destination-content {
-  padding: 18px 0 10px;
-}
-.destination-title {
-  gap: 9px;
-}
-.destination-title > strong {
-  font-size: var(--font-section);
-  color: var(--text-primary);
-}
-.destination-title > span {
-  font-size: var(--font-body);
-  color: var(--text-secondary);
-}
-.hero-content h1 {
-  font-size: var(--font-display);
-  line-height: 1.2;
-}
-.hero-description {
-  font-size: var(--font-body);
-}
-.discovery-search {
-  border-color: var(--border-control);
-  min-height: 56px;
-  height: auto;
-}
-.discovery-search input {
-  font-size: var(--font-body);
-  min-height: 44px;
-}
-.search-go {
-  min-width: 44px;
-  min-height: 44px;
-  background: var(--action);
-}
-.hero-light {
-  background: linear-gradient(90deg,var(--canvas) 0%,#faf9f6df 27%,#faf9f645 52%,transparent 68%);
-}
-.discover-section-heading h2 {
-  font-size: var(--font-title);
-  color: var(--text-primary);
-}
-.hero-location {
-  color: var(--text-body);
-  background: #fffefbf2;
-}
-@media(max-width:899px) {
-  .discovery-companion {
+  .discover-shortcuts>button {
     flex-wrap: wrap;
     flex-direction: row;
-    min-width: 0;
+    justify-content: flex-start;
+    padding: 8px 14px;
+    gap: 12px;
   }
-  .discovery-companion p {
-    flex-basis: 100%;
-  }
-  .discover-shortcuts {
-    gap: 8px;
-  }
-  .shortcut-icon {
-    width: 42px;
-    height: 42px;
-  }
-  .discover-shortcuts > button {
-    padding: 8px 4px;
-  }
-  .discover-shortcuts strong {
-    font-size: var(--font-secondary);
-  }
-}
-@media(max-width:600px) {
-  .hero-content h1 {
-    font-size: var(--font-display);
-  }
-  .hero-light {
-    background: linear-gradient(90deg,#faf9f6f0,#faf9f685 70%,#faf9f640);
-  }
-  .hero-content {
-    padding: 28px 22px;
-  }
-  .discover-shortcuts {
-    margin: 20px 0 28px;
+  .discover-shortcuts>button:first-child {
+    padding-left: 14px;
   }
   .shortcut-arrow {
     display: none;
   }
-  .discover-shortcuts>button {
-    flex-direction: column;
-    gap: 9px;
+  .shortcut-icon {
+    width: 30px;
+  }
+  .discover-shortcuts strong {
+    font-size: var(--font-secondary);
   }
   .discover-section-heading h2 {
-    font-size: var(--font-section);
-  }
-  .more-destinations {
-    min-height: 44px;
-    min-width: 44px;
-    min-height: 44px;
-  }
-  .hero-suggestions {
-    font-size: var(--font-label);
-    gap: 2px 8px;
-    flex-wrap: wrap;
-  }
-  .hero-suggestions>span,
-.hero-suggestions>i {
-    display: none;
-  }
-  .hero-suggestions button {
-    min-height: 44px;
-    min-height: 44px;
+    font-size: 1.625rem;
   }
   .destination-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 24px;
-    margin-right: 0;
-    padding-right: 0;
-    overflow: visible;
-    scroll-snap-type: none;
+    gap: 18px;
   }
-  .destination-photo {
-    aspect-ratio: 1.6;
+  .destination-title {
+    flex-direction: column;
+    gap: 2px;
   }
-  .destination-content {
-    padding-top: 14px;
-  }
-  .destination-title>strong {
+  .destination-title strong {
     font-size: var(--font-section);
   }
-  .discovery-companion h2 {
-    font-size: var(--font-section);
+  .travel-map-invite {
+    flex-wrap: wrap;
+    padding: 20px;
+    gap: 12px;
   }
-  .discover-container {
-    width: calc(100% - 40px);
+  .discovery-companion {
+    gap: 16px;
+  }
+  .discover-hero--immersive .hero-image-wrap {
+    inset: auto;
+  }
+  .discover-hero--immersive .hero-content {
+    padding-left: 0;
+  }
+  .discover-hero--immersive .hero-light {
+    display: none;
   }
 }
-@media(max-width:360px) {
+@media (max-width:600px) {
+  .discovery-search {
+    min-height: 60px;
+    padding: 6px;
+    gap: 8px;
+  }
+  .discovery-search>svg {
+    display: none;
+  }
+  .search-go {
+    gap: 6px;
+    padding: 10px 12px;
+  }
+  .search-go>svg {
+    display: none;
+  }
+  .discovery-search input {
+    height: 46px;
+  }
+  .hero-image-wrap {
+    height: 180px;
+  }
+  .search-city-panel {
+    padding: 14px;
+  }
+  .search-city-options {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+  .discover-shortcuts {
+    gap: 12px;
+  }
+  .discover-shortcuts>button {
+    flex-direction: row;
+    padding: 8px 10px;
+    gap: 10px;
+  }
+  .discover-shortcuts strong {
+    font-size: var(--font-secondary);
+  }
+  .discover-section-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .discover-section-heading h2 {
+    font-size: 1.5rem;
+  }
+  .discover-section-heading p {
+    font-size: var(--font-secondary);
+  }
+  .quiet-link {
+    margin-left: auto;
+  }
+  .mood-filters {
+    gap: 8px;
+    margin: 12px 0 16px;
+  }
+  .destination-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .destination-photo {
+    aspect-ratio: 1.85 / 1;
+  }
+  .destination-title {
+    align-items: baseline;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .destination-content {
+    padding: 0;
+  }
+  .destination-title strong {
+    font-size: 1.625rem;
+  }
+  .map-invite-symbol {
+    display: none;
+  }
+  .travel-map-invite {
+    margin-top: 20px;
+    padding: 20px;
+  }
+  .map-invite-copy {
+    flex: 1 1 100%;
+  }
+  .travel-map-invite>button {
+    min-height: 44px;
+  }
+  .discovery-companion {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 8px 0 0;
+  }
+  .discovery-companion .ui-button {
+    width: 100%;
+  }
+  .discover-footer {
+    padding: 20px 0 28px;
+  }
+}
+@media (max-width:360px) {
   .discover-container {
     width: calc(100% - 32px);
   }
-  .hero-content {
-    padding-inline: 18px;
-  }
-  .discover-shortcuts strong {
+  .hero-suggestions {
     font-size: var(--font-label);
+    gap: 0 9px;
+  }
+  .hero-suggestions i {
+    display: none;
+  }
+  .clear-search {
+    width: 44px;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  .discover-page {
+    scroll-behavior: auto;
+  }
+  .destination-photo img {
+    transition: none;
+  }
+}
+@media (max-width:899px) {
+  .hero-light {
+    display: none;
+  }
+}
+@media (max-width:600px) {
+  .hero-content h1 {
+    font-size: 2rem;
+  }
+}
+@media (max-width:600px) {
+  .hero-suggestions {
+    font-size: var(--font-label);
+    gap: 0 12px;
+  }
+}
+@media (max-width:600px) {
+  .shortcut-icon {
+    width: 36px;
+    height: 44px;
+  }
+}
+@media (max-width:600px) {
+  .mood-filters button {
+    padding: 8px 12px;
+  }
+}
+@media (max-width:360px) {
+  .discovery-search {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width:360px) {
+  .discovery-search input {
+    flex-basis: calc(100% - 52px);
+  }
+}
+@media (max-width:360px) {
+  .search-go {
+    width: 100%;
+  }
+}
+@media (min-width:1680px) {
+  .discover-container::after {
+    content: '';
+    position: absolute;
+    top: 44px;
+    right: -200px;
+    width: 180px;
+    height: 120px;
+    background: url('/art/brand-postmark.svg') center/contain no-repeat;
+    opacity: .36;
+    transform: rotate(-10deg);
+    pointer-events: none;
   }
 }
 </style>

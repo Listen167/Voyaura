@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 API = Path(__file__).resolve().parents[1]
 
 
@@ -28,10 +30,10 @@ def test_real_migration_chain_upgrades_empty_database(tmp_path: Path) -> None:
     migrate(database, "head")
     with sqlite3.connect(database) as db:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert {"users", "city_memories", "media_assets", "agent_runs", "agent_artifacts"} <= tables
+        assert {"users", "city_memories", "media_assets", "agent_runs", "agent_artifacts", "trips", "trip_days"} <= tables
         assert (
             db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            == "0014_agent_workflows"
+            == "0015_merge_agent_itinerary"
         )
         assert db.execute("SELECT COUNT(*) FROM city_visits").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM city_memories").fetchone()[0] == 0
@@ -90,4 +92,18 @@ def test_historical_rows_survive_sqlite_batch_migrations(tmp_path: Path) -> None
         assert db.execute(
             "SELECT storage_key,upload_status,scan_status FROM media_assets"
         ).fetchone() == ("fixture/photo.jpg", "ready", "not_scanned")
+        assert not db.execute("PRAGMA foreign_key_check").fetchall()
+
+
+@pytest.mark.parametrize("branch_head", ["0014_agent_workflows", "0014_itinerary_contracts"])
+def test_each_merged_branch_can_upgrade_to_head(tmp_path: Path, branch_head: str) -> None:
+    database = tmp_path / "branch.db"
+    migrate(database, branch_head)
+    migrate(database, "head")
+    with sqlite3.connect(database) as db:
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert {"agent_runs", "agent_artifacts", "trips", "trip_days"} <= tables
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == (
+            "0015_merge_agent_itinerary"
+        )
         assert not db.execute("PRAGMA foreign_key_check").fetchall()

@@ -2,6 +2,11 @@ import type { UserCandidate } from '../api/agent'
 
 export const PRACTICE_MARKER = '[离线演练]'
 
+/** Practice input belongs to an explicitly enabled development/test environment. */
+export function canUsePlannerPractice() {
+  return import.meta.env.DEV && import.meta.env.VITE_ENABLE_PLANNER_PRACTICE === 'true'
+}
+
 export function isPracticeRequest(request: Record<string, unknown>) {
   return (
     (typeof request.goal === 'string' && request.goal.startsWith(PRACTICE_MARKER)) ||

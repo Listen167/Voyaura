@@ -1,3 +1,4 @@
+import { getOwnerUsername } from './session'
 import type {
   CityMemoryConfirmResult,
   CityMemoryDeleteConfirmResult,
@@ -13,7 +14,7 @@ import { request } from './http'
 
 export function getCityMemories(
   adcode: string,
-  username = 'AuroraRovella',
+  username = getOwnerUsername(),
 ): Promise<CityMemoryDetail> {
   return request(
     `/cities/${encodeURIComponent(adcode)}/memories?username=${encodeURIComponent(username)}`,

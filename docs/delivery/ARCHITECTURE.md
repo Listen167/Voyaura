@@ -1,5 +1,7 @@
 # Voyaura 软件架构与能力边界
 
+当前补充：正式行程trips和结构化需求分析在owner认证边界挂载；0015合并两条0014迁移。见[交付说明](../HANDOFF.md)和[正式行程契约](../../docx/14-itinerary-api-apifox.md)。以下受控Agent架构仍有效。
+
 本次交付延续原项目 Vue 3、TypeScript、FastAPI、SQLAlchemy、Alembic、PostgreSQL、Redis、MinIO 体系，增加受控旅行工作流。SQLite只用于本机与自动化验收；本机没有Docker，未声称生产服务联调通过。
 
 ## 用户价值与链路
