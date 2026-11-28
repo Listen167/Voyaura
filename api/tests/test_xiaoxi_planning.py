@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from typing import Literal
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.auth import get_actor
 from app.integrations.travel_llm import (
     TravelPlanningExtractor,
     get_travel_planning_extractor,
 )
 from app.main import app
+from app.models import User
 from app.xiaoxi_planning import (
     AttractionHypothesis,
     ModelPlanningDraft,
@@ -29,6 +32,11 @@ class FakePlanningExtractor:
     def extract(self, message: str, confirmed_context: dict[str, object]) -> ModelPlanningDraft:
         self.calls.append((message, confirmed_context))
         return self.draft
+
+
+@pytest.fixture(autouse=True)
+def authenticated_preview(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(app.dependency_overrides, get_actor, lambda: User(username="AuroraRovella"))
 
 
 def _ready_draft() -> ModelPlanningDraft:

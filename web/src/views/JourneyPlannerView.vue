@@ -272,7 +272,7 @@ function dataFieldLabel(field: string) {
                 <button class="planning-analyze-button" type="submit" :disabled="!canAnalyze">
                   <LoaderCircle v-if="planningPhase === 'loading'" class="spin" :size="17" />
                   <Sparkles v-else :size="17" />
-                  <span>{{ planningPhase === 'loading' ? '正在分析' : '生成需求草案' }}</span>
+                  <span>{{ planningPhase === 'loading' ? '正在分析' : '用 DeepSeek 生成需求草案' }}</span>
                 </button>
               </form>
               <div v-if="planningCapabilityError" class="planning-inline-error"><AlertTriangle :size="16" />{{ planningCapabilityError.message }} · {{ planningCapabilityError.code }}</div>

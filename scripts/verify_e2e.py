@@ -58,6 +58,7 @@ def main() -> int:
         "VOYAURA_AMAP_WEB_PRIVATE_KEY": "",
         "VOYAURA_AGENT_LLM_ENABLED": "false",
         "VOYAURA_AGENT_LLM_API_KEY": "",
+        "VOYAURA_DEEPSEEK_API_KEY": "",
         "VOYAURA_IMAGE_PROVIDER": "disabled",
         "VITE_AMAP_KEY": "",
         "VITE_AMAP_SECURITY_CODE": "",

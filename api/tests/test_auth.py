@@ -65,6 +65,8 @@ def auth_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, 
         "/api/v1/cities/440100/memories",
         "/api/v1/image-styles",
         "/api/v1/tools/routes/capabilities",
+        "/api/v1/trips",
+        "/api/v1/xiaoxi/planning/capability",
     ],
 )
 def test_private_routes_require_bearer(auth_client: TestClient, path: str) -> None:

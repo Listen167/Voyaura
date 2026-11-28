@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 API = Path(__file__).resolve().parents[1]
 
 
@@ -23,15 +25,18 @@ def migrate(database: Path, revision: str) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_real_migration_chain_upgrades_empty_database(tmp_path: Path) -> None:
+@pytest.mark.parametrize("start", [None, "0014_agent_workflows", "0014_itinerary_contracts"])
+def test_real_migration_chain_reaches_single_head(tmp_path: Path, start: str | None) -> None:
     database = tmp_path / "empty.db"
+    if start:
+        migrate(database, start)
     migrate(database, "head")
     with sqlite3.connect(database) as db:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert {"users", "city_memories", "media_assets", "agent_runs", "agent_artifacts"} <= tables
+        assert {"users", "city_memories", "media_assets", "agent_runs", "agent_artifacts", "trips"} <= tables
         assert (
             db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-            == "0014_agent_workflows"
+            == "0015_merge_itinerary_agent"
         )
         assert db.execute("SELECT COUNT(*) FROM city_visits").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM city_memories").fetchone()[0] == 0

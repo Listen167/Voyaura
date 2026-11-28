@@ -1,0 +1,77 @@
+x-media-environment: &media-environment
+  VOYAURA_REDIS_URL: redis://redis:6379/0
+  VOYAURA_MINIO_ENDPOINT: ${VOYAURA_MINIO_ENDPOINT:?Set the public S3 hostname in .env.prod}
+  VOYAURA_MINIO_ACCESS_KEY: ${VOYAURA_MINIO_ACCESS_KEY:?Set the MinIO username in .env.prod}
+  VOYAURA_MINIO_SECRET_KEY: ${VOYAURA_MINIO_SECRET_KEY:?Set the MinIO password in .env.prod}
+  VOYAURA_MINIO_SECURE: ${VOYAURA_MINIO_SECURE:-true}
+  VOYAURA_MEDIA_SCANNER_PROVIDER: clamav
+  VOYAURA_CLAMAV_HOST: clamav
+
+services:
+  api:
+    environment: *media-environment
+
+  redis:
+    image: ${REDIS_IMAGE:-public.ecr.aws/docker/library/redis:7.4.7-alpine}
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: ${MINIO_IMAGE:-cgr.dev/chainguard/minio:latest@sha256:fb893e36fc369d41e92f678b17ec27378fa5bf0576aeef7ac15460c13629ab5a}
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${VOYAURA_MINIO_ACCESS_KEY:?Set the MinIO username in .env.prod}
+      MINIO_ROOT_PASSWORD: ${VOYAURA_MINIO_SECRET_KEY:?Set the MinIO password in .env.prod}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${VOYAURA_PUBLIC_ORIGIN:?Set the web HTTPS origin in .env.prod}
+    ports:
+      - "127.0.0.1:${VOYAURA_MINIO_API_PORT:-19000}:9000"
+    volumes:
+      - minio-data:/data
+
+  clamav:
+    image: ${CLAMAV_IMAGE:-clamav/clamav:1.4}
+    restart: unless-stopped
+    volumes:
+      - clamav-signatures:/var/lib/clamav
+      - ./clamd.conf:/etc/clamav/clamd.conf:ro
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
+      retries: 12
+
+  media-worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+      target: media-worker
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim-bookworm}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      clamav:
+        condition: service_healthy
+    environment:
+      <<: *media-environment
+      VOYAURA_ENVIRONMENT: production
+      VOYAURA_DATABASE_URL: postgresql+psycopg://voyaura:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}@postgres:5432/voyaura
+
+volumes:
+  redis-data:
+  minio-data:
+  clamav-signatures:

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.auth import require_actor_username
 from app.database import get_db
 from app.errors import AppError
 from app.models import ItineraryStop, Trip, TripDay, User
@@ -80,6 +81,7 @@ def _detail_out(trip: Trip) -> TripDetailOut:
 
 
 def _require_user(db: Session, username: str) -> User:
+    require_actor_username(db, username)
     user = db.scalar(select(User).where(User.username == username))
     if user is None:
         raise AppError(
@@ -92,6 +94,7 @@ def _require_user(db: Session, username: str) -> User:
 
 
 def _require_trip(db: Session, trip_id: uuid.UUID, username: str) -> Trip:
+    require_actor_username(db, username)
     trip = db.scalar(
         _trip_query().where(Trip.id == trip_id, Trip.user.has(User.username == username))
     )

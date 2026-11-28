@@ -1,0 +1,88 @@
+name: voyaura-prod
+
+x-database-url: &database-url postgresql+psycopg://voyaura:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}@postgres:5432/voyaura
+x-api-build: &api-build
+  context: ..
+  dockerfile: infra/Dockerfile.api
+  target: api
+  args:
+    PYTHON_IMAGE: ${PYTHON_IMAGE:-public.ecr.aws/docker/library/python:3.12-slim-bookworm}
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-public.ecr.aws/docker/library/postgres:18.6}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: voyaura
+      POSTGRES_USER: voyaura
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "voyaura", "-d", "voyaura"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  migrate:
+    build: *api-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      VOYAURA_DATABASE_URL: *database-url
+      VOYAURA_AUTH_TOKEN: ${VOYAURA_AUTH_TOKEN:?Set VOYAURA_AUTH_TOKEN in .env.prod}
+    command:
+      - sh
+      - -ec
+      - |
+        python -c 'import os; assert len(os.environ["VOYAURA_AUTH_TOKEN"]) >= 32, "VOYAURA_AUTH_TOKEN must have at least 32 characters"'
+        python -m alembic upgrade head
+        python -m app.seed
+
+  api:
+    build: *api-build
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      VOYAURA_ENVIRONMENT: production
+      VOYAURA_DATABASE_URL: *database-url
+      VOYAURA_AUTH_TOKEN: ${VOYAURA_AUTH_TOKEN:?Set VOYAURA_AUTH_TOKEN in .env.prod}
+      VOYAURA_CORS_ORIGINS: ${VOYAURA_PUBLIC_ORIGIN:-}
+      VOYAURA_AMAP_WEB_KEY: ${VOYAURA_AMAP_WEB_KEY:-}
+      VOYAURA_AMAP_WEB_PRIVATE_KEY: ${VOYAURA_AMAP_WEB_PRIVATE_KEY:-}
+      VOYAURA_DEEPSEEK_API_KEY: ${VOYAURA_DEEPSEEK_API_KEY:-}
+      VOYAURA_DEEPSEEK_MODEL: ${VOYAURA_DEEPSEEK_MODEL:-deepseek-chat}
+      VOYAURA_AGENT_LLM_ENABLED: ${VOYAURA_AGENT_LLM_ENABLED:-false}
+      VOYAURA_AGENT_LLM_API_KEY: ${VOYAURA_AGENT_LLM_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3).close()"]
+      interval: 5s
+      timeout: 4s
+      retries: 15
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-public.ecr.aws/docker/library/node:24-bookworm-slim}
+        NGINX_IMAGE: ${NGINX_IMAGE:-public.ecr.aws/docker/library/nginx:stable-alpine}
+        VITE_AMAP_KEY: ${VITE_AMAP_KEY:-}
+        VITE_AMAP_SECURITY_CODE: ${VITE_AMAP_SECURITY_CODE:-}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${VOYAURA_WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 4s
+      retries: 15
+
+volumes:
+  postgres-data:

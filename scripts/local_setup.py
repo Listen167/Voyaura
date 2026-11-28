@@ -36,6 +36,8 @@ def main() -> None:
     args = parser.parse_args()
     if not all(1024 <= p <= 65535 for p in [args.api_port, args.web_port]):
         parser.error("Ports must be between 1024 and 65535.")
+    if args.api_port == args.web_port:
+        parser.error("API and web ports must be different.")
     LOCAL.mkdir(exist_ok=True)
     profile_path = LOCAL / "api.env"
     if not profile_path.exists():
@@ -51,6 +53,7 @@ def main() -> None:
             "VOYAURA_IMAGE_PROVIDER": "disabled",
             "VOYAURA_AGENT_LLM_ENABLED": "false",
             "VOYAURA_AGENT_LLM_API_KEY": "",
+            "VOYAURA_DEEPSEEK_API_KEY": "",
             "VOYAURA_LOCAL_API_PORT": str(args.api_port),
             "VOYAURA_LOCAL_WEB_PORT": str(args.web_port),
         }

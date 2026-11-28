@@ -18,6 +18,7 @@ def main() -> None:
     profile = read_profile()
     env = {**os.environ, **profile}
     if args.service == "api":
+        env["VOYAURA_DEEPSEEK_API_KEY"] = profile.get("VOYAURA_DEEPSEEK_API_KEY", "")
         command = [
             sys.executable,
             "-m",
@@ -36,6 +37,7 @@ def main() -> None:
         env["VOYAURA_DEV_API_URL"] = (
             "http://127.0.0.1:" + profile["VOYAURA_LOCAL_API_PORT"]
         )
+        env["VITE_API_BASE_URL"] = "/api/v1"
         command = [
             npm,
             "run",

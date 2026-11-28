@@ -164,3 +164,23 @@ E2E运行器使用新建`.local/e2e-d475b381d8/test.db`，真实运行迁移、U
 - 前端 86 项测试、生产构建、后端小曦 49 项测试及相关 Ruff 检查通过。
 - Chrome 在隔离档案验证紧张情绪回应、三处校园选项和南校园草案。校区使用真实高德查询。再贴入测试攻略后，南校园显示安排 150 分钟和参考区间 120–180 分钟。
 - 5188 已启动对话接口并检查模型配置。以上浏览器测试使用本地回复和真实高德，在线 DeepSeek 调用依赖用户界面授权。
+
+## 提交前安装与启动复测（2026-11-24）
+
+- Windows / Python 3.13.12 / Node 24.20.0。隔离源码副本初始化虚拟环境，安装修订后的锁定依赖，校验 API 导入、SQLite 迁移及生产构建。
+- 后端 128 项测试、Ruff、前端 86 项测试及生产构建通过。空数据库和任一旧迁移分支均可到达唯一迁移头 `0015_merge_itinerary_agent`。
+- 两个启动命令经隔离 HTTP 复测。首页、`/plan` 和网页代理后的已认证身份接口返回 `200`。行程列表无令牌返回 `401`。
+- Docker Compose 配置校验通过。远端地址和服务器联调待确认。
+
+## Ubuntu 生产配置静态验收（2026-11-25）
+
+- `api` 全量128项及独立迁移4项通过；Ruff通过。空库与任一0014分支均收敛到唯一迁移头 `0015_merge_itinerary_agent`。
+- `web` 21个文件86项通过；Vue类型检查与Vite生产构建通过，构建产物JS 349.16 kB（gzip 114.12 kB）、CSS 260.73 kB（gzip 38.84 kB）。
+- `infra/compose.prod.yml` 及媒体叠加配置静态解析通过。核心配置仅发布 `127.0.0.1:8080 -> web:80`，API、迁移服务和PostgreSQL均无宿主机端口。
+- 本机Docker守护进程无权限，未声称已完成镜像构建、目标服务器PostgreSQL、HTTPS、MinIO、ClamAV或在线Provider实机联调；这些检查在部署主机继续执行。
+
+## Docker 源码部署包复测（2026-11-25）
+
+- Docker Desktop Linux 容器完成锁文件安装与网页构建。解压源码部署包后，`docker compose up -d --build --wait` 使用隔离卷成功启动全部基础服务，PostgreSQL 迁移版本为 `0015_merge_itinerary_agent`。
+- Nginx 对首页、SPA 深链接 `/plan`、`/health`、`/docs` 和带令牌的 `/api/v1/auth/me` 返回 `200`。初始账户为 `AuroraRovella`。独立配置下无凭证访问行程接口返回 `401`。
+- 媒体 Compose 启动后，`python -m scripts.media_pipeline_smoke` 返回 `ok: true`。Redis 队列往返、ClamAV 扫描照片与 Vlog、WebP 缩略图、FFmpeg 视频封面以及 MinIO 对象往返和清理均通过。另验证了真实预签名 `PUT` 与 `GET`。ClamAV 使用 1.4 镜像的可达镜像源。公网 TLS、实际媒体域名、在线服务和目标服务器需要上线后验收。

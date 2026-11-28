@@ -1,84 +1,91 @@
-# Voyaura
+# Voyaura · 旅途与故事
 
-Voyaura is a map-first travel companion for planning journeys, lighting up
-visited cities, preserving photos and vlogs, and turning memories into visual
-stories with Xiaoxi.
+Voyaura 是一款面向自由行的旅行规划与记录应用。出发前可以与旅行伙伴小曦讨论目的地和行程，途中可以在中国地图上点亮城市，回来后把照片、Vlog 和文字整理成私人旅行档案。网页支持电脑和手机布局。
 
-![](image\README\1794376848603.png)
+## 功能介绍
 
-## Projects
+| 模块 | 当前功能与使用方式 |
+| --- | --- |
+| 发现与中国地图 | 浏览旅行灵感和城市索引。配置高德 JS API 后显示地图，连接私人档案后按到访城市查看足迹。 |
+| 城市点亮 | 支持设备定位预览和手动选城。用户确认后记录到访，可以区分手动记录和设备定位。浏览器定位需要设备授权，并依赖 HTTPS 或 localhost。 |
+| 小曦旅行伙伴 | 支持旅行问答、心情交流、景点介绍和地点澄清。可以先询问中山大学的校区，再把选中的校区带进行程。开启界面授权后可调用 DeepSeek 参与对话。 |
+| 智能行程 | 根据天数、兴趣、同行者、每日时段及交通偏好检索候选，筛掉停车场、售票处等附属点。按位置分组并结合建议停留和市内路程排每日时间线，支持锁定必去点、继续对话调整及人工确认保存。 |
+| 攻略时长与路线证据 | 可以贴入带明确时长的攻略摘录和原文链接。时长会参与重排，页面保留参考区间和出处。可用的步行、公交／地铁和驾车时间来自高德，缺失路段标为待核实。 |
+| 城市记忆 | 每个到访城市拥有独立档案，可以记录日期和文字、浏览旅行记忆。配置对象存储、队列、扫描器和 Worker 后支持照片与 Vlog 的上传处理。 |
+| 故事和影像创作 | 授权后用已有文字记忆整理故事草稿。影像工作台可浏览风格、作品历史和生成状态。真实风格生成依赖配置好的 ComfyUI，小曦同框还需要授权的透明素材。 |
 
-- `web/`: Vue 3 responsive PWA for mobile and desktop.
-- `api/`: FastAPI service and PostgreSQL data model.
-- `worker/`: Redis worker for media scanning, thumbnails, video covers, and future image jobs.
-- `infra/`: local PostgreSQL, Redis, and MinIO services.
-- `docx/`: product, architecture, integration, database, and delivery docs.
+行程生成采用结构化需求、高德候选、按天分组、日内排序和独立约束检查。开放时间、票价或交通证据不足时，草案会标出待核实项。阶段清单见 [功能实现清单](docx/05-feature-checklist.md)。
 
-## Quick Start
+## 环境依赖与一键安装
 
-1. Copy `.env.example` to `.env`; optionally copy `web/.env.example` to `web/.env.local` for AMap credentials.
-2. Start Docker Desktop, then run `docker compose --env-file .env -f infra/compose.yml up -d`.
-3. From `api/`, create `.venv` and run `python -m pip install -e ".[dev]"` with that environment.
-4. From `api/`, run `python -m alembic -c alembic.ini upgrade head`, then `python -m app.seed`.
-5. From `api/`, start `python -m uvicorn app.main:app --host 127.0.0.1 --port 8001`.
-6. From `web/`, run `npm install`, then `npm run dev -- --host 127.0.0.1 --port 5174`.
-7. From the project root, start the media worker with `.\worker\run.ps1`.
+| 环境 | 推荐配置 |
+| --- | --- |
+| 本地演示 | Windows 或 Linux，Python 3.12（脚本接受 3.11–3.13），Node.js 24 LTS（含 npm），可使用 uv 加速 Python 安装 |
+| 公网部署 | Linux 主机、Nginx、Docker Engine 与 Compose v2，使用 PostgreSQL 保存正式数据 |
+| 媒体处理 | Redis、兼容 S3 的对象存储、FFmpeg／FFprobe，以及 Windows Defender 或 ClamAV |
+| 可选在线能力 | 高德 JS API 与 Web 服务凭证、DeepSeek API Key、ComfyUI 工作流 |
 
-Local services:
+在项目根目录运行。脚本创建 Python 虚拟环境，按锁文件安装前后端依赖，然后初始化独立 SQLite 档案与访问令牌。
 
-- Web: `http://127.0.0.1:5174`
-- API docs: `http://127.0.0.1:8001/docs`
-- PostgreSQL/Navicat: `127.0.0.1:5433`
-- Redis: `127.0.0.1:6379`
-- MinIO API: `http://127.0.0.1:9000`
-- MinIO console: `http://127.0.0.1:9001`
+```bash
+python scripts/install.py
+```
 
-Uploaded media remains hidden until the worker finishes malware scanning and
-creates a WebP thumbnail or video cover. Run the isolated environment check
-from `api/` with `.\.venv\Scripts\python.exe scripts\media_pipeline_smoke.py`.
-The city archive lists pending and failed media tasks, retries recoverable
-worker failures, and deletes one asset through preview and confirmation.
-The worker also removes expired, unfinished upload intents once per hour. Run
-that cleanup manually from `api/` with
-`.\.venv\Scripts\python.exe -m app.media_cleanup --limit 100`.
+默认 Demo 用本地规则和虚拟演练地点即可体验规划流程。服务器仅安装依赖时可执行 `python scripts/install.py --dependencies-only`。已有的 `.local/api.env` 和访问令牌会继续沿用。
 
-The city archive includes a date-grouped photo/Vlog gallery. Ready photos can
-open the private style dialog. Image generation is disabled by default; after
-configuring a ComfyUI API-format workflow in `api/.env`, start its separate
-worker from the project root with `.\worker\run-image.ps1`. See
-`docx/07-comfyui-integration.md` for the node mapping and verification flow.
-The Visual Studio view keeps generation history, favorite filters, signed
-downloads, idempotent deletion, and a touch-friendly before/after slider in a
-responsive desktop/mobile workspace. UI reference prompts for Image 2 are in
-`docx/08-ui-image-prompts.md`.
+## 部署运行步骤
 
-The map overview includes a real-data year timeline. Selecting a year filters
-the city markers and footprint totals together; years are derived only from
-confirmed visit endpoints and memory dates, and ready media contributes to the
-matching memory year.
+安装完成后，打开两个终端，从项目根目录分别启动 API 和网页。
 
-The `minimal_zine_poster` preset adapts the MIT-licensed GC Minimal Zine
-Poster v0.3.1 prompt system. Voyaura stores its recipe version and source
-preservation level with each image job. See `THIRD_PARTY_NOTICES.md` for the
-required license notice; upstream example images are not included.
+```powershell
+# Windows · 终端 1
+.\api\.venv\Scripts\python.exe scripts/local_serve.py api
+# Windows · 终端 2
+.\api\.venv\Scripts\python.exe scripts/local_serve.py web
+```
 
-Image jobs may optionally add a deterministic travel stamp containing the
-memory title, city, and date. The image worker renders this after provider
-generation so Chinese text remains readable. Hosts without a supported CJK
-font must set `VOYAURA_IMAGE_CAPTION_FONT_PATH`.
+```bash
+# Linux · 终端 1
+api/.venv/bin/python scripts/local_serve.py api
+# Linux · 终端 2
+api/.venv/bin/python scripts/local_serve.py web
+```
 
-Xiaoxi co-photos use an optional authorized transparent PNG and deterministic
-composition after provider generation. Until both
-`VOYAURA_XIAOXI_PHOTO_ASSET_PATH` and
-`VOYAURA_XIAOXI_PHOTO_ASSET_VERSION` are configured, the UI keeps this option
-disabled and the API rejects attempts to create a fake co-photo. See
-`docx/09-xiaoxi-photo-assets.md`.
+- 网页演示在 [127.0.0.1:5188](http://127.0.0.1:5188/)。打开计划页可选择「填入离线演练条件」并主动生成草案。
+- API 文档在 [127.0.0.1:8018/docs](http://127.0.0.1:8018/docs)。`/health` 提供进程存活检查。
+- 在「我的档案」连接测试档案 `AuroraRovella`。令牌在本机 `.local/access-token.txt`，提交材料仅包含配置示例。
 
-The Redis image comes from Amazon ECR's official Docker Library mirror. The
-MinIO image comes from Chainguard and is pinned by digest. These project-level
-sources avoid depending on a machine-wide Docker Hub mirror. If startup fails,
-run `docker compose --env-file .env -f infra/compose.yml ps` and inspect the
-failing service with `docker compose --env-file .env -f infra/compose.yml logs SERVICE`.
+公网部署可用 Docker Compose 启动网页、FastAPI、PostgreSQL 和数据库迁移。宿主机 Nginx 提供公网 HTTPS。照片与 Vlog 可按需添加 MinIO、Redis、ClamAV 和媒体 Worker。公开演示地址待补充。 [公网部署与复现指南](docx/DEPLOYMENT.md)
 
-The default seed creates `AuroraRovella` as the first tester without inventing
-any travel history. Authentication will be added in a later milestone.
+## 项目目录
+
+```text
+web/       Vue 3 响应式界面与前端测试
+api/       FastAPI、数据库迁移、规划引擎与 API 测试
+worker/    媒体处理和图片生成入口及工作流说明
+infra/     PostgreSQL、Redis、MinIO 的 Compose 配置
+scripts/   一键安装、开发启动与独立验收
+docx/      产品、架构、部署、接入及实现清单
+```
+
+## 开源组件与第三方服务
+
+前端采用 Vue 3、Vue Router、Vite、TypeScript 和 Lucide。后端采用 FastAPI、SQLAlchemy、Alembic、LangChain 和 Pillow。PostgreSQL 用于持久化，Redis 用于任务队列，MinIO 提供对象存储。影像流程可接入 FFmpeg、ClamAV 和 ComfyUI。工程依赖版本以 `web/package-lock.json` 和 `api/requirements-dev.lock` 为准。
+
+高德地图与 DeepSeek 是独立服务，使用各自的服务凭证与条款。GC Minimal Zine Poster 的提示词改编和配图署名见 [第三方组件与素材说明](docx/THIRD_PARTY_NOTICES.md)。
+
+## 码道在项目开发中的应用
+
+团队在 VS Code 中安装华为码道插件。提交的《码道使用情况.docx》按环境搭建、代码检查、服务器购买与设计方案四类场景保留了使用截图。同一份附件作为过程材料提交。各场景的用途见 [码道应用总结](docx/码道应用总结.md)。
+
+## 后续完善规划
+
+1. **规划效果**。引入更多真实城市样本，比较不同分区与重排策略的总时长、交通时间与必去完成率，补齐多日跨区修复。
+2. **出行数据**。接入有授权的天气、城际班次与票务信息，覆盖如何到达、如何返程、营业及预约时效。逐步补齐午餐、晚餐和预算建议。
+3. **小曦和知识库**。扩充带来源和更新时间的城市指南，支持用户分享攻略及语音交流，并完善对话授权和记忆管理。
+4. **影像与移动端**。完善 Vlog 队列恢复、弱网上传、ComfyUI 模板和小曦同框素材，开展 iOS Safari 与 Android Chrome 真机验收。
+5. **公开运行能力**。建设多人账户、会话撤销、服务配额、运行监控和备份恢复。当前 Demo 使用单人私有访问令牌。
+
+## 验证与排查
+
+接口测试和静态检查在 `api/` 启动，网页测试在 `web/` 启动。命令与故障处理见 [运行手册](docx/RUNBOOK.md) 和 [错误排查目录](docx/06-error-catalog.md)。

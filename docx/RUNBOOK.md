@@ -9,6 +9,12 @@ Windows；Python3.12.10；Node25.8.1/npm11.11.0；Chrome桌面1440×1000和移�
 在仓库根目录执行（路径有空格时使用引号）：
 
 ```powershell
+python scripts/install.py
+```
+
+如需分步安装，可以执行下面的命令。
+
+```powershell
 uv venv api/.venv --python 3.12
 uv pip install --python api/.venv/Scripts/python.exe --default-index https://pypi.org/simple --require-hashes -r api/requirements-dev.lock
 npm --prefix web ci
@@ -17,7 +23,7 @@ api/.venv/Scripts/python.exe scripts/local_setup.py
 
 已有venv无需重复创建。本任务实际使用Workbench自带Python3.12.10建venv；普通开发者可使用自己安装的Python3.12。若镜像返回403，使用上面的官方PyPI参数，不修改全局镜像配置。
 
-首次初始化生成 `.local/api.env`、随机32字节访问令牌、空SQLite数据库，再逐项运行0001—0014真实Alembic迁移与幂等seed。seed仅用户和城市字典，无旅行经历；重复运行不替换已有profile或令牌。文件均被Git忽略。
+首次初始化生成 `.local/api.env`、随机32字节访问令牌、空SQLite数据库，再运行 Alembic 迁移至 `0015_merge_itinerary_agent` 与幂等 seed。seed 建立用户和城市字典。重复运行继续使用原档案与令牌，文件均被 Git 忽略。
 
 开两个终端：
 
@@ -58,7 +64,7 @@ api/.venv/Scripts/python.exe scripts/verify_e2e.py
 ## 可选服务及生产配置
 
 1. 高德Web服务：服务端环境 `VOYAURA_AMAP_WEB_KEY` 与可选数字签名私钥；JS底图另需 `web/.env.local` 的Key与security code。只有用户在任务中允许外部服务才查询；无配置显示缺信息／示意图。10007是真实签名错误，不以假响应绕过。
-2. 可选模型：`VOYAURA_AGENT_LLM_ENABLED=true`、`VOYAURA_AGENT_LLM_API_KEY`、`VOYAURA_AGENT_LLM_MODEL=deepseek-chat`，需界面额外同意可能收费的模型调用。适配器只提关键词，不做照片理解；本轮未在线验证。
+2. 对话可选模型使用 `VOYAURA_DEEPSEEK_API_KEY` 和 `VOYAURA_DEEPSEEK_MODEL`，本地启动时填写 `.local/api.env`，公网部署时填写 `api/.env`。启用后由体验者在界面授权在线调用。旧规划工具可选适配使用 `VOYAURA_AGENT_LLM_*`。
 3. 完整媒体栈：保留 `infra/compose.yml` 的PostgreSQL、Redis、MinIO及worker脚本，先阅读原docx/02、07、09说明。执行 `docker compose --env-file .env -f infra/compose.yml up -d` 后，在API工作目录配置自己的数据库/令牌/对象存储/扫描器，再运行Alembic、seed、Uvicorn与媒体worker。本轮未在本机实跑该组合。
 4. API从当前工作目录的.env读取；生产在api/.env或进程环境配置，仓库根.env供Compose使用。不要误以为根.env自动成为API配置。
 5. 生产构建的前端使用 `/api/v1`，由同源反向代理将该前缀转发到Uvicorn，其他路径提供web/dist与SPA回退。TLS、秘密管理、备份、角色/会话、限流、worker可靠交付、病毒扫描均须在上线前另行验收；本次没有公开部署。
